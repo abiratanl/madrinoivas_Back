@@ -1,8 +1,8 @@
 -- =================================================================================
 -- DATABASE CREATION AND SETUP
 -- =================================================================================
-CREATE DATABASE IF NOT EXISTS `loja_db` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
-USE `loja_db`;
+CREATE DATABASE IF NOT EXISTS `madri_db` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+USE `madri_db`;
 
 -- =================================================================================
 -- 1. STORES

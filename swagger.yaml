@@ -1,0 +1,392 @@
+# Definition of the security scheme (JWT Token)
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+# Global security (can be overridden on each route)
+security:
+  - bearerAuth: []
+
+paths:
+  # ==========================
+  # AUTHENTICATION (AUTH)
+  # ==========================
+  /api/auth/login:
+    post:
+      summary: Log in (Get Token)
+      tags: [Auth]
+      security: [] # Public route
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: string
+                  example: admin@loja.com
+                password:
+                  type: string
+                  example: 123456
+      responses:
+        200:
+          description: Login successful.
+        401:
+          description: Credenciais inválidas
+        429:
+          description: Many attempts (Temporary block)
+
+  /api/auth/forgot-password:
+    post:
+      summary: Solicitar recuperação de senha
+      tags: [Auth]
+      security: [] # Public route
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+              properties:
+                email:
+                  type: string
+                  example: admin@loja.com
+      responses:
+        200:
+          description: Token sent (simulated in the console)
+
+  /api/auth/reset-password/{token}:
+    post:
+      summary: Set a new password
+      tags: [Auth]
+      security: [] # Public route
+      parameters:
+        - in: path
+          name: token
+          schema:
+            type: string
+          required: true
+          description: Token received by email
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - password
+              properties:
+                password:
+                  type: string
+                  example: newPassword123
+      responses:
+        200:
+          description: Password changed successfully.
+
+  /api/auth/change-password:
+    post:
+      summary: Change Password (Required on first access)
+      tags: [Auth]
+      security:
+        - bearerAuth: [] # <--- It requires the padlock to be closed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - currentPassword
+                - newPassword
+              properties:
+                currentPassword:
+                  type: string
+                  example: NOVA8f2a1b
+                  description: The temporary password you received
+                newPassword:
+                  type: string
+                  example: MyNewSecurePassword123
+      responses:
+        200:
+          description: Password changed and account unlocked.
+        401:
+          description: Current password incorrect.
+
+  # ==========================
+  # USUÁRIOS (USERS)
+  # ==========================
+  /api/users:
+    get:
+      summary: List all users (Admin only)
+      tags: [Users]
+      responses:
+        200:
+          description: List of users
+        403:
+          description: Access denied (Requires Admin)
+
+    post:
+      summary: Create a new user (Admin only)
+      tags: [Users]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - email
+                - password
+              properties:
+                name:
+                  type: string
+                  example: New Employee
+                email:
+                  type: string
+                  example: novo@store.com
+                password:
+                  type: string
+                  example: senha123
+                role:
+                  type: string
+                  enum: [admin, proprietario, atendente]
+                  example: atendente
+      responses:
+        201:
+          description: User created
+        409:
+          description: Email already exists.
+
+  /api/users/{id}:
+    get:
+      summary: Search for user by ID
+      tags: [Users]
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+          description: User UUID
+      responses:
+        200:
+          description: User data
+        404:
+          description: User not found
+
+    put:
+      summary: Update user (Admin only)
+      tags: [Users]
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                role:
+                  type: string
+      responses:
+        200:
+          description: Updated successfully.
+
+    delete:
+      summary: Delete user (Admin only)
+      tags: [Users]
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+      responses:
+        200:
+          description: Deleted successfully
+
+  # ==========================
+  # PERFIL (PROFILE)
+  # ==========================
+  /api/users/me:
+    get:
+      summary: View my profile (Logged in user))
+      tags: [Profile]
+      responses:
+        200:
+          description: Current profile data
+    put:
+      summary: Update my profile (Name only)
+      tags: [Profile]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  example: My New Name
+      responses:
+        200:
+          description: Updated profile
+  # ==========================
+  # CATEGORIAS (CATEGORIES)
+  # ==========================
+  /api/categories:
+    get:
+      summary: Listar todas as categorias
+      tags: [Categories]
+      responses:
+        200:
+          description: Lista de categorias retornada com sucesso.
+    post:
+      summary: Criar uma nova categoria
+      tags: [Categories]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                  example: Vestidos de Noiva
+      responses:
+        201:
+          description: Categoria criada.
+
+  /api/categories/{id}:
+    put:
+      summary: Atualizar categoria
+      tags: [Categories]
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: integer
+          required: true
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+      responses:
+        200:
+          description: Atualizada com sucesso.
+    delete:
+      summary: Excluir categoria
+      tags: [Categories]
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: integer
+          required: true
+      responses:
+        200:
+          description: Excluída com sucesso.
+
+  # ==========================
+  # PRODUTOS (PRODUCTS)
+  # ==========================
+  /api/products:
+    get:
+      summary: Listar produtos (Filtro por categoria opcional)
+      tags: [Products]
+      parameters:
+        - in: query
+          name: category_id
+          schema:
+            type: integer
+          required: false
+          description: ID numérico da categoria para filtrar
+      responses:
+        200:
+          description: Lista de produtos obtida com sucesso.
+    post:
+      summary: Cadastrar novo produto/vestido
+      tags: [Products]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - category_id
+                - price_rent
+              properties:
+                name:
+                  type: string
+                  example: Vestido Madri Imperial
+                category_id:
+                  type: integer
+                  example: 1
+                price_rent:
+                  type: number
+                  example: 1500.00
+                size:
+                  type: string
+                  example: M
+      responses:
+        201:
+          description: Produto cadastrado.
+
+  # ==========================
+  # CLIENTES (CLIENTS)
+  # ==========================
+  /api/costumers:
+    get:
+      summary: Listar todos os clientes
+      tags: [Clients]
+      responses:
+        200:
+          description: Lista de clientes obtida.
+    post:
+      summary: Cadastrar novo cliente
+      tags: [Clients]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - cpf
+              properties:
+                name:
+                  type: string
+                  example: Maria Silva
+                cpf:
+                  type: string
+                  example: '123.456.789-00'
+                phone:
+                  type: string
+                  example: '(12) 99999-9999'
+      responses:
+        201:
+          description: Cliente criado com sucesso.

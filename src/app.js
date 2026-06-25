@@ -1,4 +1,3 @@
-
 const express = require('express');
 const cors = require('cors');
 const swaggerUi = require('swagger-ui-express');
@@ -21,12 +20,14 @@ const { apiLimiter } = require('./middlewares/rateLimitMiddleware');
 const app = express();
 
 // --- CONFIGURAÇÃO CORS ---
-app.use(cors({
-    origin: 'http://localhost:5173', 
-    credentials: true, 
+app.use(
+  cors({
+    origin: 'http://localhost:5173',
+    credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
-}));
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  }),
+);
 
 // --- MIDDLEWARES ---
 app.use(express.json());
@@ -50,13 +51,13 @@ app.get('/', (req, res) => {
 
 // --- ROTAS DA API ---
 app.use('/api/users', userRoutes);
-app.use('/api/auth', authRoutes); 
+app.use('/api/auth', authRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/rentals', rentalRoutes);
-app.use('/api/stores', storeRoutes); 
+app.use('/api/stores', storeRoutes);
 app.use('/api/transfers', transferRoutes);
 
 // Global Error Handler
