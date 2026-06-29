@@ -54,21 +54,29 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/api', apiLimiter);
 
 // --- DYNAMIC SWAGGER ROUTING ---
-// Local (VM default): http://localhost:3000/api-docs
-// Production (VPS env): https://www.madrinoivas.com.br/api/api-docs
 const swaggerPath = process.env.SWAGGER_PATH || '/api-docs';
 
 const swaggerOptions = {
   swaggerOptions: {
-    url: `${swaggerPath}/swagger.json`, // Dynamically syncs the UI file fetching path
+    // Força o Swagger UI a buscar o JSON usando o caminho absoluto correto
+    url: `${swaggerPath}/swagger.json`,
   },
+  customCssUrl: 'https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.11.0/swagger-ui.min.css',
+  customJs: [
+    'https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.11.0/swagger-ui-bundle.js',
+    'https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.11.0/swagger-ui-standalone-preset.js',
+  ],
 };
 
-// Explicitly exposes the raw JSON documentation schema endpoint
+// 1. Rota do JSON (Garante que responda sem conflito)
 app.get(`${swaggerPath}/swagger.json`, (req, res) => res.json(swaggerDocument));
 
-// Mounts the graphical Swagger interface middleware stack
-app.use(swaggerPath, swaggerUi.serve, swaggerUi.setup(swaggerDocument, swaggerOptions));
+// 2. Rota da Interface (O array faz o Express aceitar com E sem barra no final)
+app.use(
+  [swaggerPath, `${swaggerPath}/`],
+  swaggerUi.serve,
+  swaggerUi.setup(swaggerDocument, swaggerOptions),
+);
 
 // --- ROOT ENDPOINT ---
 app.get('/', (req, res) => {
