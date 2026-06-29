@@ -1,59 +1,50 @@
 # --- Dependencies ---
-
 node_modules/
 
 # --- Environment and Security (CRITICAL) ---
-
 .env
+.env.production
 .env.local
 .env.*.local
-# Ignore local keys and certificates
-
+# Ignore local keys, certificates, and database credentials
 *.pem
 *.key
+*.sql
 
-# --- Logs and Debugging --- npm-debug.log*
+# --- Database & Docker (Local data volumes) ---
+.docker-data/
+mysql-data/
 
+# --- Logs and Debugging ---
+npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 logs/
 *.log
 
 # --- Operating System Files ---
-
 .DS_Store
 Thumbs.db
 ehthumbs.db
 Desktop.ini
 
 # --- Editors and IDEs ---
-# VS Code
-
-.vscode/*
-!.vscode/extensions.json
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-
-# IntelliJ / WebStorm
-
+# Strictly ignore all IDE configuration overrides to prevent credential leaks
+.vscode
 .idea/
 
 # --- Build and Distribution ---
-# If you use TypeScript or build steps in the future
-
 dist/
 build/
 out/
 
 # --- Tests and Coverage ---
-
 coverage/
 .nyc_output/
 
-# --- Temporary Development Files ---
-
+# --- Temporary Development and Upload Files ---
 test-upload.js
 test-avatar-upload.js
 temp/
 tmp/
+uploads/
