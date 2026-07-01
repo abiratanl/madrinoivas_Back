@@ -35,8 +35,8 @@ const swaggerDocument = {
               schema: {
                 type: 'object',
                 properties: {
-                  email: { type: 'string', example: 'admin@teste.com' },
-                  password: { type: 'string', example: '123456' },
+                  email: { type: 'string', example: 'admin@madrinoivas.com.br' },
+                  password: { type: 'string', example: 'senha123' },
                 },
               },
             },

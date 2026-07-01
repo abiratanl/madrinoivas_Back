@@ -5,23 +5,26 @@ require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
 const mysql = require('mysql2/promise');
 
 const getPort = () => {
-  // 1. If we are in TEST mode, prioritize the external port.
+  // 1. Se estiver em modo TEST, prioriza a porta externa
   if (process.env.NODE_ENV === 'test') {
-    return process.env.DB_PORT_EXTERNAL ? parseInt(process.env.DB_PORT_EXTERNAL) : 3307;
+    return parseInt(process.env.DB_PORT_EXTERNAL) || 3307;
   }
 
-  // 2. If the host is 'db' (Docker), ALWAYS use 3306.
-  // This prevents rule 3 (below) from being activated inside the container.
-  if (process.env.DB_HOST === 'db') {
+  // Define o nome do serviço (padrão 'db' se a variável não estiver definida)
+  const serviceName = process.env.DB_SERVICE_NAME || 'db';
+
+  // 2. Se o host for o nome do serviço Docker, estamos dentro da rede interna
+  if (process.env.DB_HOST === serviceName) {
     return 3306;
   }
 
-  // 3. If the host is local, use the external port (useful for scripts outside of Docker).
+  // 3. Se o host for local, usamos a porta externa definida no .env
   if (process.env.DB_HOST === '127.0.0.1' && process.env.DB_PORT_EXTERNAL) {
     return parseInt(process.env.DB_PORT_EXTERNAL);
   }
 
-  return process.env.DB_PORT ? parseInt(process.env.DB_PORT) : 3306;
+  // 4. Fallback padrão
+  return parseInt(process.env.DB_PORT) || 3306;
 };
 
 const pool = mysql.createPool({

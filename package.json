@@ -5,7 +5,8 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "nodemon -L src/server.js",
+    "dev": "fuser -k 3000/tcp 2>/dev/null || true && nodemon -L src/server.js",
+    "dev:start": "docker compose up -d db && fuser -k 3000/tcp 2>/dev/null || true && npm run dev",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "test:watch": "cross-env NODE_ENV=test jest --watch",
@@ -33,7 +34,6 @@
     "nodemailer": "^7.0.13",
     "sharp": "^0.34.5",
     "swagger-jsdoc": "^6.2.8",
-    "swagger-ui-express": "^5.0.1",
     "uuid": "^9.0.1",
     "yamljs": "^0.3.0"
   },
