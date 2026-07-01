@@ -26,25 +26,19 @@ app.get('/batata', (req, res) => {
 });
 
 // --- CORS CONFIGURATION ---
-const allowedOrigins = [process.env.FRONTEND_URL, process.env.API_URL].filter(Boolean);
+// Pega a string, divide por vírgula e transforma em array
+const allowedOrigins = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : [];
 
+// Agora você pode usar esse array no CORS
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Adicione este log para ver no terminal exatamente o que está bloqueado
-      if (origin) console.log('Tentativa de conexão vinda de:', origin);
-
       if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
-        // Isso vai imprimir o erro real no terminal
-        console.error('CORS Bloqueado para a origem:', origin);
-        callback(new Error('Bloqueado pelo CORS do Madri Noivas em Dev'));
+        callback(new Error('CORS bloqueado'));
       }
     },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
   }),
 );
 
