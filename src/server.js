@@ -6,12 +6,13 @@ const validateEnv = require('./utils/validateEnv'); // Import the validator
 validateEnv();
 
 const PORT = process.env.PORT || 3000;
+const API_BASE_URL = process.env.API_URL || 'http://localhost';
 
 // 2. Start the server
 app.listen(PORT, () => {
   console.log(`=================================`);
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📄 Swagger: http://localhost:${PORT}/api-docs`);
-  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🚀 Server running on port ${PORT}\n`);
+  console.log(`📄 Swagger: ${API_BASE_URL}/api-docs\n`);
+  console.log(`⚙️  Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`=================================`);
 });

@@ -9,7 +9,7 @@ const swaggerDocument = {
   },
   servers: [
     // Atenção: Mantenha a porta que você está usando (3000 ou 3002)
-    { url: 'http://localhost:3000', description: 'Servidor Local' },
+    { url: process.env.API_URL || 'http://localhost:3000', description: 'Servidor Local' },
   ],
   components: {
     securitySchemes: {

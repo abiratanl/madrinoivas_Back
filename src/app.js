@@ -3,7 +3,7 @@ const cors = require('cors');
 //const swaggerUi = require('swagger-ui-express');
 
 // --- DOCUMENTATION IMPORT ---
-//const swaggerDocument = require('./docs/swagger');
+const swaggerDocument = require('./docs/swagger');
 
 // --- ROUTE IMPORTS ---
 const authRoutes = require('./routes/authRoutes');
@@ -67,7 +67,6 @@ app.use(express.urlencoded({ extended: true }));
 // ==================================================================================
 // RENDERIZADOR NATIVO (Sem dependências, sem erros de importação)
 // ==================================================================================
-const swaggerDocument = require('./docs/swagger');
 
 app.get('/api-docs', (req, res) => {
   res.send(`

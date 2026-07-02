@@ -47,4 +47,5 @@ test-upload.js
 test-avatar-upload.js
 temp/
 tmp/
-uploads/
+uploads/help.md
+help.md
