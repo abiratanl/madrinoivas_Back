@@ -1,5 +1,4 @@
 // src/docs/swagger.js
-
 const swaggerDocument = {
   openapi: '3.0.0',
   info: {
@@ -8,8 +7,10 @@ const swaggerDocument = {
     description: 'Sistema de Gerenciamento de Rede de Lojas de Aluguel de Trajes',
   },
   servers: [
-    // Atenção: Mantenha a porta que você está usando (3000 ou 3002)
-    { url: process.env.API_URL || 'http://localhost:3000', description: 'Servidor Local' },
+    {
+      url: process.env.API_URL,
+      description: `${process.env.NODE_ENV} server`,
+    },
   ],
   components: {
     securitySchemes: {
