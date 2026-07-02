@@ -19,26 +19,44 @@ const { apiLimiter } = require('./middlewares/rateLimitMiddleware');
 
 const app = express();
 
-// Rota de Teste Absoluto
-app.get('/batata', (req, res) => {
-  console.log('>>> A REQUISIÇÃO CHEGOU NO SERVIDOR! <<<');
-  res.send('<h1>Se essa tela abriu, o seu computador está bloqueando a palavra api-docs!</h1>');
-});
+// // --- CORS CONFIGURATION ---
+// // Pega a string, divide por vírgula e transforma em array
+// const allowedOrigins = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : [];
+
+// // Agora você pode usar esse array no CORS
+// app.use(
+//   cors({
+//     origin: (origin, callback) => {
+//       if (!origin || allowedOrigins.includes(origin)) {
+//         callback(null, true);
+//       } else {
+//         callback(new Error('CORS bloqueado'));
+//       }
+//     },
+//   }),
+// );
 
 // --- CORS CONFIGURATION ---
-// Pega a string, divide por vírgula e transforma em array
-const allowedOrigins = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : [];
 
-// Agora você pode usar esse array no CORS
+const localhostRegex = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+
+const productionRegex = /^https?:\/\/(www\.)?madrinoivas\.com\.br$/;
+
 app.use(
   cors({
-    origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error('CORS bloqueado'));
+    origin(origin, callback) {
+      // Permite Postman, Insomnia, curl etc.
+      if (!origin) {
+        return callback(null, true);
       }
+
+      if (localhostRegex.test(origin) || productionRegex.test(origin)) {
+        return callback(null, true);
+      }
+
+      callback(new Error(`Origem não permitida: ${origin}`));
     },
+    credentials: true,
   }),
 );
 
