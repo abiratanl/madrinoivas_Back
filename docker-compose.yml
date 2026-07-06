@@ -33,14 +33,14 @@ services:
 
   # Serviço auxiliar APENAS para desenvolvimento
   db-dev-ports:
-  image: alpine/socat
-  command: 'tcp-listen:${DB_PORT_EXTERNAL:-3306},fork,reuseaddr tcp-connect:db:3306'
-  ports:
-    - '${DB_PORT_EXTERNAL:-3306}:3306'
-  depends_on:
-    - db
-  profiles:
-    - dev
+    image: alpine/socat
+    command: 'tcp-listen:${DB_PORT_EXTERNAL:-3306},fork,reuseaddr tcp-connect:db:3306'
+    ports:
+      - '${DB_BIND_HOST:-127.0.0.1}:${DB_PORT_EXTERNAL:-3306}:3306'
+    depends_on:
+      - db
+    profiles:
+      - dev
 
 volumes:
   db_data:
