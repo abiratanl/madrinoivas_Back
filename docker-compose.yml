@@ -1,35 +1,27 @@
 services:
-  # Database Service
   db:
     image: mysql:8.0
-    # The container name will be prefixed by the project name automatically
     restart: always
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
       MYSQL_DATABASE: ${DB_NAME}
-    ports:
-      # Maps EXTERNAL_PORT from host to INTERNAL_PORT in container
-      - "${DB_PORT_EXTERNAL:-3306}:3306"
+    # SEM ports: aqui (produção por padrão)
     volumes:
-      # Generic volume name: Docker handles the project prefix
       - db_data:/var/lib/mysql
-      # Entrypoint for database initialization
-      - "./init.sql:/docker-entrypoint-initdb.d/init.sql"
+      - './init.sql:/docker-entrypoint-initdb.d/init.sql'
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_PASSWORD}"]
+      test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost', '-u', 'root', '-p${DB_PASSWORD}']
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # Backend API Service
   api:
     build: .
     ports:
-      - "${PORT:-3000}:${PORT:-3000}"
+      - '${API_BIND_HOST:-127.0.0.1}:${PORT:-3000}:${PORT:-3000}'
     environment:
       - DB_HOST=db
       - DB_PORT=3306
-    # ---------------------------------
     env_file:
       - .env
     volumes:
@@ -39,6 +31,16 @@ services:
       db:
         condition: service_healthy
 
-# Define the generic volume used by the db service
+  # Serviço auxiliar APENAS para desenvolvimento
+  db-dev-ports:
+  image: alpine/socat
+  command: 'tcp-listen:${DB_PORT_EXTERNAL:-3306},fork,reuseaddr tcp-connect:db:3306'
+  ports:
+    - '${DB_PORT_EXTERNAL:-3306}:3306'
+  depends_on:
+    - db
+  profiles:
+    - dev
+
 volumes:
   db_data:
