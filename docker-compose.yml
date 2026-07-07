@@ -1,11 +1,15 @@
 services:
+  # Database Service
   db:
     image: mysql:8.0
     restart: always
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
       MYSQL_DATABASE: ${DB_NAME}
-    # SEM ports: aqui (produção por padrão)
+    ports:
+      # Em produção: não expor (remover esta linha)
+      # Em dev: expor para localhost
+      - '${DB_BIND_HOST:-127.0.0.1}:${DB_PORT_EXTERNAL:-3307}:3306'
     volumes:
       - db_data:/var/lib/mysql
       - './init.sql:/docker-entrypoint-initdb.d/init.sql'
@@ -15,6 +19,7 @@ services:
       timeout: 5s
       retries: 5
 
+  # Backend API Service
   api:
     build: .
     ports:
@@ -31,16 +36,19 @@ services:
       db:
         condition: service_healthy
 
-  # Serviço auxiliar APENAS para desenvolvimento
-  db-dev-ports:
-    image: alpine/socat
-    command: 'tcp-listen:${DB_PORT_EXTERNAL:-3306},fork,reuseaddr tcp-connect:db:3306'
-    ports:
-      - '${DB_BIND_HOST:-127.0.0.1}:${DB_PORT_EXTERNAL:-3306}:3306'
-    depends_on:
-      - db
-    profiles:
-      - dev
-
 volumes:
   db_data:
+
+  # # Serviço auxiliar APENAS para desenvolvimento
+  # db-dev-ports:
+  #   image: alpine/socat
+  #   command: 'tcp-listen:${DB_PORT_EXTERNAL:-3306},fork,reuseaddr tcp-connect:db:3306'
+  #   ports:
+  #     - '${DB_BIND_HOST:-127.0.0.1}:${DB_PORT_EXTERNAL:-3306}:3306'
+  #   depends_on:
+  #     - db
+  #   profiles:
+  #     - dev
+
+# volumes:
+#   db_data:

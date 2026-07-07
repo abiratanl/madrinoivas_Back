@@ -19,23 +19,6 @@ const { apiLimiter } = require('./middlewares/rateLimitMiddleware');
 
 const app = express();
 
-// // --- CORS CONFIGURATION ---
-// // Pega a string, divide por vírgula e transforma em array
-// const allowedOrigins = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : [];
-
-// // Agora você pode usar esse array no CORS
-// app.use(
-//   cors({
-//     origin: (origin, callback) => {
-//       if (!origin || allowedOrigins.includes(origin)) {
-//         callback(null, true);
-//       } else {
-//         callback(new Error('CORS bloqueado'));
-//       }
-//     },
-//   }),
-// );
-
 // --- CORS CONFIGURATION ---
 
 const localhostRegex = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
@@ -65,30 +48,37 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // ==================================================================================
-// RENDERIZADOR NATIVO (Sem dependências, sem erros de importação)
+// RENDERIZADOR NATIVO (Apenas em desenvolvimento)
 // ==================================================================================
 
-app.get('/api-docs', (req, res) => {
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <title>Madri Noivas API</title>
-        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.11.0/swagger-ui.min.css" />
-      </head>
-      <body>
-        <div id="swagger-ui"></div>
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.11.0/swagger-ui-bundle.js"></script>
-        <script>
-          SwaggerUIBundle({
-            spec: ${JSON.stringify(swaggerDocument)},
-            dom_id: '#swagger-ui'
-          });
-        </script>
-      </body>
-    </html>
-  `);
-});
+if (process.env.NODE_ENV !== 'production') {
+  app.get('/api-docs', (req, res) => {
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Madri Noivas API</title>
+          <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.11.0/swagger-ui.min.css" />
+        </head>
+        <body>
+          <div id="swagger-ui"></div>
+          <script src="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.11.0/swagger-ui-bundle.js"></script>
+          <script>
+            SwaggerUIBundle({
+              spec: ${JSON.stringify(swaggerDocument)},
+              dom_id: '#swagger-ui'
+            });
+          </script>
+        </body>
+      </html>
+    `);
+  });
+} else {
+  // Em produção, retorna 404
+  app.get('/api-docs', (req, res) => {
+    res.status(404).json({ error: 'Not found' });
+  });
+}
 
 // ==================================================================================
 // 2º LUGAR: SECURITY & TRAFFIC CONTROL
