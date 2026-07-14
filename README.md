@@ -1,8 +1,9 @@
-<a id=summary></a>
+<a id="summary"></a>
 <br>
-# Backend Boilerplate (Node.js + MySQL + Docker) #
 
-A robust, production-ready boilerplate for building RESTful APIs using Node.js and MySQL. It features a fully Dockerized environment, JWT authentication, **Swagger documentation**, **Automated Testing**, Role-Based Access Control (RBAC), **Rate Limiting**, and a secure invite-only registration flow.
+# Madri Noivas - Backend (Node.js + MySQL + Docker) #
+
+A robust, production-ready backend application for the Madri Noivas clothing rental platform. Built with Node.js and MySQL, it features a fully Dockerized environment, JWT authentication, **Swagger documentation**, **Automated Testing**, Role-Based Access Control (RBAC), **Rate Limiting**, and a secure invite-only registration flow.
 <br>
 
 ## 📋 Summary ##
@@ -12,49 +13,43 @@ A robust, production-ready boilerplate for building RESTful APIs using Node.js a
 - [API Documentation](#api-documentation)
 - [Project Structure](#project-structure)
 - [Security Features](#security-features)
+- [Email & DNS Configuration (Cloudflare)](#email-dns-configuration)
 - [Setup for a New Project](#customization)
--  [Troubleshooting](#troubleshooting)
-<br><a id=key-features></a><br>
+- [Troubleshooting](#troubleshooting)
+<br><a id="key-features"></a><br>
 
-## 🚀  Key Features &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#summary) ##
+## 🚀 Key Features &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#summary) ##
 
 - **Dockerized Environment:** Zero-config setup with Docker & Docker Compose.
 - **MVC Architecture:** Clean separation of concerns (Controllers, Services, Models).
 - **🛡️ Advanced Security:**
   - **JWT Authentication:** Secure stateless authentication.
-  - **Rate Limiting:** Protection against DDoS (Global) and Brute-Force attacks (Login specific).
+  - **Rate Limiting:** Protection against DDoS (Global) and Brute-Force attacks (Login specific) behind an Nginx reverse proxy.
   - **Password Hashing:** Uses `bcryptjs` for secure storage.
   - **Helmet & CORS:** HTTP header security.
 - **🔄 Account Recovery:** Complete "Forgot Password" and "Reset Password" flow with token expiration logic calculated database-side.
-* 📚 **Fully Documented**: Interactive API documentation via **Swagger/OpenAPI 3.0**.
-
+- 📚 **Fully Documented**: Interactive API documentation via **Swagger/OpenAPI 3.0**.
 - **🧪 Production-Grade Tests**: Comprehensive test suite (Unit, Integration, and Security) using **Jest** and **Supertest** running in band to prevent race conditions.
-
-* **Data Integrity**: Uses **UUIDs** for primary keys and implements **Soft Deletes** (logical exclusion) to preserve data history.
+- **Data Integrity**: Uses **UUIDs** for primary keys and implements **Soft Deletes** (logical exclusion) to preserve data history for rental transactions and products.
 - **RBAC (Role-Based Access Control):** Native support for roles: `admin`, `proprietario` (owner), and `atendente` (staff/attendant).
-- **Invite-Only Workflow:** Public registration is disabled. Users are created via admin invites and activate their accounts via token.
+- **Invite-Only Workflow:** Public registration is disabled. Users are created via admin invites and activate their accounts via token sent to their email.
 - **Database Seeding:** Automatic database creation and population via `init.sql`.
 
-<br><a id=tech-stack></a><br>
+<br><a id="tech-stack"></a><br>
 
 ## 🛠️ Tech Stack &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#summary) ##
 
 - **Runtime:** Node.js
-
 - **Framework:** Express.js
-
 - **Database:** MySQL 8.0
-
 - **ORM/Driver:** mysql2 (using Promises/Connection Pool)
-
+- **Infrastructure:** Hostinger VPS (Ubuntu), Nginx Reverse Proxy, Cloudflare (DNS)
 - **Testing**: Jest, Supertest, Cross-Env
-
 - **Documentation**: Swagger UI, YAML
-
 - **Dev Tools:** Nodemon (configured for Docker hot-reloading)
 
 ---
-<br><a id=getting-started></a><br>
+<br><a id="getting-started"></a><br>
 
 ## 🏁 Getting Started &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#summary) ##
 
@@ -62,16 +57,13 @@ A robust, production-ready boilerplate for building RESTful APIs using Node.js a
 
 - [Docker](https://www.docker.com/) and Docker Compose installed on your machine.
 - You **do not** need Node.js or MySQL installed locally to run the project.
-
 - Optional: Node.js (v18+) if you wish to run tests locally outside Docker.
 
 ### 1. Clone the repository ###
 
-`bash`
-```
-git clone https://github.com/abiratanl/backend-boilerplate.git
-
-cd backend-boilerplate
+```bash
+git clone <repository-url>
+cd madrinoivas-backend
 ```
 
 ### 2. Configure Environment Variables ###
@@ -79,37 +71,29 @@ cd backend-boilerplate
 Create the `.env` file based on the example provided.
 
 **Linux/Mac:**
-
-  `Bash`
-
-  ```
-  cp .env.example .env
-  ```
+```bash
+cp .env.example .env
+```
 
 **Windows (PowerShell):**
-
-  `Bash`
-
-  ```
-  copy .env.example .env
-  ```
+```bash
+copy .env.example .env
+```
 
 Note: The default values in `.env.example` are already configured to work with the Docker container.
-
 
 ### 3. Run the Application ###
 
 Start the application and the database containers:
 
-`Bash`
-  ```
-  docker compose up --build
-  ```
+```bash
+docker compose up --build
+```
 
 The server will start at: `http://localhost:3000`
 
 ---
-<br><a id=api-documentation></a><br>
+<br><a id="api-documentation"></a><br>
 
 ## 📚 API Documentation &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#summary) ##
 
@@ -121,28 +105,22 @@ Once the server is running, access the interactive documentation at:
 
 ---
 
-
-**🧪 Running Tests**
+### 🧪 Running Tests ###
 
 This boilerplate comes with a complete test suite covering:
 
 1. **Unit Tests**: Controller logic and mocks.
-
 2. **Integration Tests**: Real database operations (CRUD).
-
 3. **Security Tests**: Rate limiting verification and Password Reset flows.
 
 To run the tests locally (requires Node.js installed):
 
-`Bash`
-
-```
+```bash
 # Install dependencies
 npm install
 
 # Run the test command:
 npm test
-
 ```
 Note: The `npm test` command is configured to run tests sequentially (`--runInBand`) to avoid database race conditions.
 
@@ -152,20 +130,18 @@ Note: The `npm test` command is configured to run tests sequentially (`--runInBa
 
 When running for the first time, the `init.sql` script will automatically create the `loja_db` database, the `users` table, and insert the following seed users (password hashes represent `123456`):
 
-
-Role | Email | Password (Hash) | 
+| Role | Email | Password (Hash) | 
 | :--- | :--- | :--- |
 | **Admin** | admin@loja.com | 123456 |
 | **Proprietario** (Owner) | dono@loja.com | 123456 | 
 | **Atendente** (Staff) | atendente@loja.com | 123456|
 
 ---
-<br><a id=project-structure></a><br>
+<br><a id="project-structure"></a><br>
 
 ## 📂 Project Structure &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#summary) ##
 
-`Plaintext` 
-```
+```plaintext
 src/
 ├── config/         # Database connection pool
 ├── controllers/    # Request handlers (Auth, User)
@@ -183,96 +159,89 @@ tests/
 ├── ratelimit.test.js      # Brute-force protection tests
 └── user.test.js           # Unit tests (Mocked)
 ```
-<br><a id=security-features></a><br>
+<br><a id="security-features"></a><br>
 
 ## 🔒 Security Features &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#summary) ##
 
-**1. Rate Limiting**
-
+**1. Rate Limiting (Behind Nginx)**
+- The application uses `express-rate-limit`. Because it operates behind an Nginx reverse proxy, the Express server is explicitly configured to read the `X-Forwarded-For` header by enabling `app.set('trust proxy', 1)`.
 - **Global API**: Limits IPs to 100 requests per 15 minutes.
-
 - **Login Endpoint**: Strict limit of 5 failed attempts per 15 minutes to prevent brute-force attacks.
 
-
 **2. Authentication Flow**
-
 Protected routes require a **Bearer Token** in the Authorization header.
-
-1. POST `/api/auth/login` to receive a token.
+1. `POST /api/auth/login` to receive a token.
 2. Send header: `Authorization: Bearer <YOUR_TOKEN>`
 
-**3. Password Recovery**
-User requests a token via `POST /api/auth/forgot-password`.
+**3. Password Recovery & User Registration (Invite Flow)**
+- Public "Sign Up" is disabled. 
+- Admin sends an invite via `/api/auth/invite`.
+- The system generates a secure token and emails it to the user.
+- The user completes registration or resets their password via token validation.
 
-System generates a secure token with a database-side expiration (e.g., 10 minutes).
-
-User resets password via `POST /api/auth/reset-password/:token`.
-
-**User Registration (Invite Flow)**
-
-There is no public "Sign Up".
-1. Admin sends an invite via `/api/auth/invite`.
-2. System generates a unique token.
-3. User accesses the frontend with the link and sets their password via `/api/auth/complete-registration`.
 ---
-<br><a id=customization></a><br>
+<br><a id="email-dns-configuration"></a><br>
+
+## 📧 Email & DNS Configuration (Cloudflare) &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#summary) ##
+
+The application utilizes NodeMailer to dispatch transactional emails (invites, temporary passwords) via Hostinger SMTP. Because the domain's DNS is managed by **Cloudflare**, strict DNS configurations are required to ensure 10/10 deliverability and prevent emails from landing in spam.
+
+### ⚠️ The "Gray Cloud" Rule (Proxy Status)
+Any DNS record related to email authentication (`TXT`, `CNAME`, `MX`) or secondary protocols (like `ftp`) **MUST** have the Cloudflare Proxy status disabled (**DNS Only**). If proxied (Orange Cloud), receiving mail servers cannot read the cryptographic signatures and will fail the message.
+
+### Required DNS Records
+The following records must be present and configured as **DNS Only** in the Cloudflare dashboard:
+
+**1. SPF (Sender Policy Framework)**
+*   **Type:** `TXT`
+*   **Name:** `@` (or `madrinoivas.com.br`)
+*   **Content:** `v=spf1 include:_spf.mail.hostinger.com ~all`
+
+**2. DKIM (DomainKeys Identified Mail)**
+*   **Type:** `CNAME`
+*   **Name:** E.g., `hostingermail-a._domainkey` (Generated in the Hostinger Email Panel)
+*   **Content:** The corresponding cryptographic key provided by Hostinger.
+*   *Note: Ensure all 3 DKIM keys generated by Hostinger are added as DNS Only.*
+
+**3. DMARC**
+*   **Type:** `TXT`
+*   **Name:** `_dmarc`
+*   **Content:** `v=DMARC1; p=none; rua=mailto:nao-responda@madrinoivas.com.br`
+
+---
+<br><a id="customization"></a><br>
 
 ## ⚙️ Customization (Setup for a New Project) &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#summary) ##
 
 If you are cloning this boilerplate to start a brand new project, follow these steps to detach it from the template and configure the database correctly:
 
 **1. Update Project Metadata**
-
-Open `package.json` and update the following fields to match your new project:
-
-`JSON `
-```
-{
-  "name": "my-new-project-name",
-  "version": "1.0.0",
-  "description": "Description of the new project...",
-  "author": "Your Name"
-}
-```
+Open `package.json` and update the `name`, `version`, and `description` fields to match your new project.
 
 **2. Security Configuration (.env)**
-
 In your `.env` file (created from `.env.example`), **you must change**:
-* JWT_SECRET: Generate a new long random string (e.g., using openssl rand -base64 32).
-* DB_PASSWORD: Set a strong password for the database root user.
-* DB_NAME: Change this to a unique name for your project (e.g., `bakery_system_db`).
+* `JWT_SECRET`: Generate a new long random string (e.g., using `openssl rand -base64 32`).
+* `DB_PASSWORD`: Set a strong password for the database root user.
+* `DB_NAME`: Change this to a unique name for your project (e.g., `madrinoivas_db`).
 
 **3. Database Renaming (Crucial Step)**
-
 If you changed `DB_NAME` in the `.env` file, you **must** manually update it in two other files to ensure the connection works:
 
 **A. In** `docker-compose.yml`:
-
-Update the `MYSQL_DATABASE` environment variable to match your new name:
-
-`YAML`
-```
+```yaml
     environment:
-      MYSQL_DATABASE: bakery_system_db  # <--- Change this
+      MYSQL_DATABASE: madrinoivas_db  # <--- Change this
 ```
 
 **B. In** `init.sql`:
-
-Update the database creation logic at the top of the file:
-
-`SQL`
+```sql
+CREATE DATABASE IF NOT EXISTS madrinoivas_db; -- <--- Change this
+USE madrinoivas_db;                           -- <--- Change this
 ```
-CREATE DATABASE IF NOT EXISTS bakery_system_db; -- <--- Change this
-USE bakery_system_db;                           -- <--- Change this
-```
-
 
 **4. Re-initialize Git**
-
 To detach this project from the boilerplate repository and start a fresh history:
-
-`Bash`
-```
+```bash
 # 1. Remove the existing git history
 rm -rf .git  # (Linux/Mac) or 'rd .git /s /q' (Windows)
 
@@ -282,53 +251,27 @@ git add .
 git commit -m "initial commit"
 ```
 ---
-<br><a id=troubleshooting></a><br>
+<br><a id="troubleshooting"></a><br>
 
 ## 🛠 Troubleshooting   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#summary) ##
 
 **MySQL Port Conflict (3306)**
-
 If you already have a MySQL instance running locally on port **3306**, the Docker container will fail to start.
-
-**Sintoma**:  The `docker compose up` command displays the error: `Bind for 0.0.0.0:3306 failed: port is already allocated`.
-
-*Solução*:
-
-1. In the `docker-compose.yml` file, modify the ports section of the database service:
-
-`YAML`
-```
-ports:
-  - "3307:3306" # Map port 3307 from your PC to port 3306 on Docker.
-  ```
-2. In your `.env` file, update:
-
-`Snippet de código`
-```
-DB_PORT=3307
-DB_HOST=127.0.0.1
-```
-
-The test script (`npm test`) is already configured to automatically attempt the connection via `127.0.0.1:3307` to avoid conflicts.
+* **Symptom**:  The `docker compose up` command displays the error: `Bind for 0.0.0.0:3306 failed: port is already allocated`.
+* **Solution**: Modify the ports section in `docker-compose.yml` to map to `3307:3306`, and update `DB_PORT=3307` in your `.env` file. The test script is configured to adapt to this change automatically.
 
 **Connection Error During Tests (ECONNREFUSED)**
-
-If tests fail when trying to connect to `127.0.0.1:3306` even with Docker running:
-
-Check if the `your-application-name-db-1` container is active: `docker ps` command.
-
-Make sure the `src/config/database.js` file is reading the `process.env.DB_PORT` variable.
+Check if the database container is active using `docker ps`. Make sure the `src/config/database.js` file is properly reading the `process.env.DB_PORT` variable.
 
 ---
 <br>
+
 ### 🤝 Contributing ###
 
-1. Create a feature branch (git checkout -b feature/amazing-feature)
-2. Commit your changes (git commit -m 'feat: add amazing feature')
-3. Push to the branch (git push origin feature/amazing-feature)
+1. Create a feature branch (`git checkout -b feature/amazing-feature`)
+2. Commit your changes (`git commit -m 'feat: add amazing feature'`)
+3. Push to the branch (`git push origin feature/amazing-feature`)
 4. Open a Pull Request
+
 ---
-
-**License** This project is open-source and available under the MIT License.
-
-
+**License:** This project is open-source and available under the MIT License.
