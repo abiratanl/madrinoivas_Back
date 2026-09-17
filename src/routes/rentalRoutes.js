@@ -5,12 +5,15 @@ const { protect } = require('../middlewares/authMiddleware');
 
 router.use(protect);
 
+// Listagem e Cadastro
 router.get('/', rentalController.getAllRentals);
-router.get('/:id', rentalController.getRentalById);
 router.post('/', rentalController.createRental);
 
-
-// Operational Actions
+// Operações Individuais
+router.get('/:id', rentalController.getRentalById);
+router.put('/:id', rentalController.updateRental);       
+router.post('/:id/pickup', rentalController.pickUpRental); 
+router.post('/:id/extend', rentalController.extendRental); 
 router.post('/:id/return', rentalController.returnRental);
 router.post('/:id/cancel', rentalController.cancelRental);
 

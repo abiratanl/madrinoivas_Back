@@ -38,13 +38,13 @@ describe('Rental Operations (Return & Cancel)', () => {
     });
 
     // 2. Mock da Operação de Banco
-    RentalModel.returnRental.mockResolvedValue(true);
+    RentalModel.returnRental.mockResolvedValue({ penaltyFee: 0 });
 
-    const res = await request(app).post('/api/rentals/rental-active/return');
+    const res = await request(app).post('/api/rentals/rental-active/return').send({});
 
     expect(res.statusCode).toBe(200);
     expect(res.body.message).toMatch(/devolução registrada/i);
-    expect(RentalModel.returnRental).toHaveBeenCalledWith('rental-active');
+    expect(RentalModel.returnRental).toHaveBeenCalledWith('rental-active', 0);
   });
 
   it('POST /api/rentals/:id/return › Should FAIL if already returned', async () => {
