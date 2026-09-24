@@ -183,7 +183,7 @@ class RentalModel {
     const conn = await db.getConnection();
     try {
       await conn.beginTransaction();
-      const { discount, notes, end_date_scheduled, items } = data;
+      const { discount, notes, end_date_scheduled, items, status } = data;
 
       // 1. Valida se aluguel pode ser editado (não picked_up/returned/cancelled)
       const [rentalRows] = await conn.query(
@@ -218,8 +218,8 @@ class RentalModel {
 
       // 4. Atualiza aluguel
       await conn.query(
-        `UPDATE rentals SET discount = ?, notes = ?, end_date_scheduled = COALESCE(?, end_date_scheduled), total_amount = ? WHERE id = ?`,
-        [discount || 0, notes || null, end_date_scheduled, finalAmount, id]
+        `UPDATE rentals SET discount = ?, notes = ?, end_date_scheduled = COALESCE(?, end_date_scheduled), total_amount = ?, status = ? WHERE id = ?`,
+        [discount || 0, notes || null, end_date_scheduled, finalAmount, status || rental.status, id]
       );
 
       // 5. Recalcula parcelas pendentes se total mudou
