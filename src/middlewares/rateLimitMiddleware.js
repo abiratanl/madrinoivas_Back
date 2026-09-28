@@ -1,8 +1,10 @@
 const rateLimit = require('express-rate-limit');
 
+const isDev = process.env.NODE_ENV !== 'production';
+
 const apiLimiterConfig = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  max: isDev ? 10000 : 100, // High limit in dev, 100 in prod
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -13,7 +15,7 @@ const apiLimiterConfig = rateLimit({
 
 const loginLimiterConfig = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100, // Blocks after 5 attempts.
+  max: isDev ? 1000 : 100, // Higher in dev
   message: {
     status: 'error',
     message: 'Muitas tentativas de login. Tente novamente mais tarde.',

@@ -19,6 +19,7 @@ const { apiLimiter } = require('./middlewares/rateLimitMiddleware');
 
 const app = express();
 app.set('trust proxy', 1);
+const swaggerPath = '/api-docs';
 
 // --- CORS CONFIGURATION ---
 
