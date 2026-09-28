@@ -76,6 +76,32 @@ class RentalModel {
       for (const item of items) {
         const itemId = uuidv4();
 
+        // Validar sobreposição de datas para produtos não-budget
+        if (status !== 'budget') {
+          const [overlap] = await conn.query(
+            `SELECT r.id, r.status, r.start_date, r.end_date_scheduled 
+             FROM rental_items ri
+             JOIN rentals r ON ri.rental_id = r.id
+             WHERE ri.product_id = ?
+               AND r.status IN ('reserved', 'picked_up', 'late')
+               AND (
+                 r.status = 'late'
+                 OR (r.start_date < ? AND r.end_date_scheduled > ?)
+               )
+             LIMIT 1`,
+            [item.product_id, end_date_scheduled, start_date]
+          );
+          
+          if (overlap.length > 0) {
+            const [productInfo] = await conn.query('SELECT name, code FROM products WHERE id = ?', [item.product_id]);
+            const existing = overlap[0];
+            const conflictType = existing.status === 'late' 
+              ? 'atrasado (devolução pendente)' 
+              : `reservado/retirado (${existing.start_date} a ${existing.end_date_scheduled})`;
+            throw new Error(`Produto "${productInfo[0]?.name || item.product_id}" já está ${conflictType}.`);
+          }
+        }
+
         // A. Insere na tabela de ligação
         await conn.query(
           `INSERT INTO rental_items (id, rental_id, product_id, unit_price, quantity) VALUES (?, ?, ?, ?, ?)`,
@@ -200,7 +226,39 @@ class RentalModel {
       // 2. Se vierem novos itens, substitui os antigos
       if (items && items.length > 0) {
         await conn.query("DELETE FROM rental_items WHERE rental_id = ?", [id]);
+        
+        const checkStartDate = data.start_date || rental.start_date;
+        const checkEndDate = end_date_scheduled || rental.end_date_scheduled;
+        const newStatus = status || rental.status;
+        
         for (const item of items) {
+          // Validar sobreposição de datas (exceto budget)
+          if (newStatus !== 'budget') {
+            const [overlap] = await conn.query(
+              `SELECT r.id, r.status, r.start_date, r.end_date_scheduled 
+               FROM rental_items ri
+               JOIN rentals r ON ri.rental_id = r.id
+               WHERE ri.product_id = ?
+                 AND r.id != ?
+                 AND r.status IN ('reserved', 'picked_up', 'late')
+                 AND (
+                   r.status = 'late'
+                   OR (r.start_date < ? AND r.end_date_scheduled > ?)
+                 )
+               LIMIT 1`,
+              [item.product_id, id, checkEndDate, checkStartDate]
+            );
+            
+            if (overlap.length > 0) {
+              const [productInfo] = await conn.query('SELECT name, code FROM products WHERE id = ?', [item.product_id]);
+              const existing = overlap[0];
+              const conflictType = existing.status === 'late' 
+                ? 'atrasado (devolução pendente)' 
+                : `reservado/retirado (${existing.start_date} a ${existing.end_date_scheduled})`;
+              throw new Error(`Produto "${productInfo[0]?.name || item.product_id}" já está ${conflictType}.`);
+            }
+          }
+          
           await conn.query(
             `INSERT INTO rental_items (id, rental_id, product_id, unit_price, quantity) VALUES (?, ?, ?, ?, ?)`,
             [uuidv4(), id, item.product_id, item.unit_price, item.quantity || 1]
