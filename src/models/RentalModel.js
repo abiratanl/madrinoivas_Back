@@ -50,26 +50,26 @@ class RentalModel {
         laundry_days_needed,
         items, // Array de { product_id, price }
         installments_config, // { count: 3, first_due_date: '...' }
-        notes, discount, status // 'budget' ou 'reserved'
+        notes, discount, status, penalty_fee // 'budget' ou 'reserved'
       } = data;
 
       // 1. Calcular Totais
       let totalAmount = 0;
       items.forEach(item => totalAmount += (parseFloat(item.unit_price) * (item.quantity || 1)));
 
-      const finalAmount = totalAmount - (discount || 0);
+      const finalAmount = totalAmount - (discount || 0) + (penalty_fee || 0);
 
       // 2. Inserir Contrato (Rental)
       const sqlRental = `
         INSERT INTO rentals (
           id, store_id, customer_id, user_id, delivery_address_id, delivery_type,
-          laundry_days_needed, start_date, end_date_scheduled, status, total_amount, discount, notes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          laundry_days_needed, start_date, end_date_scheduled, status, total_amount, discount, notes, penalty_fee
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
 
       await conn.query(sqlRental, [
         rentalId, store_id, customer_id, user_id, delivery_address_id || null, delivery_type || 'pickup_store',
-        laundry_days_needed || 2, start_date, end_date_scheduled, status || 'reserved', finalAmount, discount || 0, notes
+        laundry_days_needed || 2, start_date, end_date_scheduled, status || 'reserved', finalAmount, discount || 0, notes, penalty_fee || 0
       ]);
 
       // 3. Inserir Itens e Atualizar Estoque
@@ -153,7 +153,7 @@ class RentalModel {
   // Listagem simples
   static async findAll(filters = {}) {
     let sql = `
-      SELECT r.id, r.status, r.start_date, r.end_date_scheduled, r.total_amount,
+      SELECT r.id, r.status, r.start_date, r.end_date_scheduled, r.total_amount, r.penalty_fee,
              c.name as customer_name, s.name as store_name
       FROM rentals r
       JOIN customers c ON r.customer_id = c.id
@@ -209,11 +209,11 @@ class RentalModel {
     const conn = await db.getConnection();
     try {
       await conn.beginTransaction();
-      const { discount, notes, end_date_scheduled, items, status } = data;
+      const { discount, notes, end_date_scheduled, items, status, penalty_fee } = data;
 
       // 1. Valida se aluguel pode ser editado (não picked_up/returned/cancelled)
       const [rentalRows] = await conn.query(
-        `SELECT id, status, start_date, end_date_scheduled, total_amount, discount 
+        `SELECT id, status, start_date, end_date_scheduled, total_amount, discount, penalty_fee 
          FROM rentals WHERE id = ? FOR UPDATE`,
         [id]
       );
@@ -272,12 +272,12 @@ class RentalModel {
         [id]
       );
       const totalAmount = parseFloat(sumResult[0].total);
-      const finalAmount = totalAmount - (discount || 0);
+      const finalAmount = totalAmount - (discount || 0) + (penalty_fee || 0);
 
       // 4. Atualiza aluguel
       await conn.query(
-        `UPDATE rentals SET discount = ?, notes = ?, end_date_scheduled = COALESCE(?, end_date_scheduled), total_amount = ?, status = ? WHERE id = ?`,
-        [discount || 0, notes || null, end_date_scheduled, finalAmount, status || rental.status, id]
+        `UPDATE rentals SET discount = ?, notes = ?, end_date_scheduled = COALESCE(?, end_date_scheduled), total_amount = ?, penalty_fee = ?, status = ? WHERE id = ?`,
+        [discount || 0, notes || null, end_date_scheduled, finalAmount, penalty_fee || 0, status || rental.status, id]
       );
 
       // 5. Recalcula parcelas pendentes se total mudou
