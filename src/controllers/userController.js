@@ -172,9 +172,9 @@ class UserController {
   static async updateUser(req, res) {
     try {
       const { id } = req.params;
-      const { name, role, is_active } = req.body;
+      const { name, role, is_active, store_id } = req.body;
 
-      const updated = await UserModel.update(id, { name, role, is_active });
+      const updated = await UserModel.update(id, { name, role, is_active, store_id });
 
       if (!updated) {
         return res.status(404).json({

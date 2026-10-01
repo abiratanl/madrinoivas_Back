@@ -10,8 +10,8 @@ jest.mock('../src/models/ProductModel');
 // 2. Mock da Autenticação (Simula usuário logado)
 jest.mock('../src/middlewares/authMiddleware', () => ({
   protect: (req, res, next) => {
-    // Simulando um ATENDENTE da Loja A
-    req.user = { id: 'user-1', role: 'atendente', storeId: 'store-A' };
+    // Simulando um ATTENDANT da Loja A
+    req.user = { id: 'user-1', role: 'attendant', storeId: 'store-A' };
     next();
   },
   restrictTo: (...roles) => (req, res, next) => next(),

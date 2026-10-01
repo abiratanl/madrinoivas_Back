@@ -9,10 +9,10 @@ const RentalModel = require('../src/models/RentalModel');
 jest.mock('../src/models/RentalModel');
 // Não precisamos do ProductModel aqui pois o RentalModel.returnRental resolve tudo internamente
 
-// Mock Auth: Usuário Atendente da Loja A
+// Mock Auth: Usuário Attendant da Loja A
 jest.mock('../src/middlewares/authMiddleware', () => ({
   protect: (req, res, next) => {
-    req.user = { id: 'user-op', role: 'atendente', storeId: 'store-A' };
+    req.user = { id: 'user-op', role: 'attendant', storeId: 'store-A' };
     next();
   },
   restrictTo: (...roles) => (req, res, next) => next(),

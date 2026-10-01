@@ -12,7 +12,7 @@ jest.mock('../src/models/CustomerModel');
 // Mock da Autenticação
 jest.mock('../src/middlewares/authMiddleware', () => ({
   protect: (req, res, next) => {
-    req.user = { id: 'user-id', role: 'atendente', storeId: 'store-A' };
+    req.user = { id: 'user-id', role: 'attendant', storeId: 'store-A' };
     next();
   },
   restrictTo: (...roles) => (req, res, next) => next(),

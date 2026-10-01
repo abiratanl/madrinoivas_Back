@@ -9,7 +9,7 @@ exports.createRental = async (req, res) => {
       start_date,
       end_date_scheduled,
       installments_config,
-      store_id // Opcional se for atendente
+      store_id // Opcional se for attendant
     } = req.body;
 
     // 1. Validações Básicas

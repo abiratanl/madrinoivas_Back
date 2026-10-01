@@ -51,7 +51,7 @@ class UserModel {
       name,
       email,
       password,
-      role || 'atendente',
+      role || 'attendant',
       isActive,
       mustChangePassword,
     ]);
@@ -61,7 +61,7 @@ class UserModel {
       store_id: storeIdValue,
       name,
       email,
-      role: role || 'atendente',
+      role: role || 'attendant',
       is_active: isActive,
       must_change_password: mustChangePassword,
     };

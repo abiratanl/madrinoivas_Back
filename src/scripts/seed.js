@@ -40,8 +40,8 @@ async function seed() {
     const hashedPassword = await bcrypt.hash('123456', 10);
     const users = [
       { id: uuidv4(), name: 'Admin Matriz', email: 'admin@teste.com', role: 'admin', store_id: stores[0].id },
-      { id: uuidv4(), name: 'Gerente Shopping', email: 'gerente@teste.com', role: 'proprietario', store_id: stores[1].id },
-      { id: uuidv4(), name: 'Vendedor Bairro', email: 'vendedor@teste.com', role: 'atendente', store_id: stores[2].id }
+      { id: uuidv4(), name: 'Gerente Shopping', email: 'gerente@teste.com', role: 'owner', store_id: stores[1].id },
+      { id: uuidv4(), name: 'Vendedor Bairro', email: 'vendedor@teste.com', role: 'attendant', store_id: stores[2].id }
     ];
 
     for (const u of users) {
@@ -120,8 +120,8 @@ async function seed() {
     console.log('✅ SEED CONCLUÍDO COM SUCESSO!');
     console.log('------------------------------------------------');
     console.log(`🔑 Login Admin:    ${users[0].email} | Senha: 123456 (Loja 1)`);
-    console.log(`🔑 Login Gerente:  ${users[1].email} | Senha: 123456 (Loja 2)`);
-    console.log(`🔑 Login Vendedor: ${users[2].email} | Senha: 123456 (Loja 3)`);
+    console.log(`🔑 Login Owner:    ${users[1].email} | Senha: 123456 (Loja 2)`);
+    console.log(`🔑 Login Attendant: ${users[2].email} | Senha: 123456 (Loja 3)`);
     console.log('------------------------------------------------');
     process.exit(0);
 

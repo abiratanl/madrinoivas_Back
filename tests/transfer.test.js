@@ -8,8 +8,8 @@ jest.mock('../src/models/TransferModel');
 jest.mock('../src/models/ProductModel');
 jest.mock('../src/middlewares/authMiddleware', () => ({
   protect: (req, res, next) => {
-    // Simulando atendente da Loja DESTINO (store-B)
-    req.user = { id: 'user-2', role: 'atendente', storeId: 'store-B' };
+    // Simulando attendant da Loja DESTINO (store-B)
+    req.user = { id: 'user-2', role: 'attendant', storeId: 'store-B' };
     next();
   },
   restrictTo: (...roles) => (req, res, next) => next(),

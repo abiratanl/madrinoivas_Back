@@ -42,7 +42,7 @@ describe('INTEGRATION TESTS: User API', () => {
     const newUser = {
       name: 'Integration User',
       email: `integration.${Date.now()}@test.com`,
-      role: 'atendente',
+      role: 'attendant',
       // Note: We do not send passwords; the system should generate them!
     };
 

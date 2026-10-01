@@ -36,7 +36,7 @@ exports.register = async (req, res) => {
       email,
       password,
       store_id: store_id || null, // Ensure null if empty
-      role: role || 'cliente'
+      role: role || 'customer'
     });
 
     // 3. Generate Token (Optional: auto-login after register)
@@ -114,9 +114,9 @@ exports.login = async (req, res) => {
 
     // =================================================================
     // 🔍 INTEGRITY CHECK: STORE CONSISTENCY
-    // If user is 'atendente' (staff) but has no store assigned, warn or block.
+    // If user is 'attendant' (staff) but has no store assigned, warn or block.
     // =================================================================
-    if (user.role === 'atendente' && !user.store_id) {
+    if (user.role === 'attendant' && !user.store_id) {
        console.warn(`[Auth Warning] Staff user ${user.id} has no Store ID assigned.`);
        // Optional: Block login if strict mode is desired
        // return res.status(403).json({ status: 'error', message: 'Staff account configuration error.' });

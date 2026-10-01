@@ -12,7 +12,7 @@ const testUser = {
   name: 'Reset Test User',
   email: 'reset.test@example.com',
   password: 'oldpassword123',
-  role: 'cliente',
+  role: 'customer',
 };
 
 let authToken;

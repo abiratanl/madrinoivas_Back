@@ -10,10 +10,10 @@ const ProductModel = require('../src/models/ProductModel');
 jest.mock('../src/models/RentalModel');
 jest.mock('../src/models/ProductModel');
 
-// Mock Auth: Usuário Atendente da Loja A
+// Mock Auth: Usuário Attendant da Loja A
 jest.mock('../src/middlewares/authMiddleware', () => ({
   protect: (req, res, next) => {
-    req.user = { id: 'user-vendedor', role: 'atendente', storeId: 'store-A' };
+    req.user = { id: 'user-vendedor', role: 'attendant', storeId: 'store-A' };
     next();
   },
   restrictTo: (...roles) => (req, res, next) => next(),

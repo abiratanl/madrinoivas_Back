@@ -101,7 +101,7 @@ exports.createProduct = async (req, res) => {
     let finalStoreId;
 
     // Verifique como você salvou o role no token JWT (pode ser 'admin', 'owner', 'superadmin')
-    const isAdmin = req.user.role === 'admin' || req.user.role === 'proprietario';
+    const isAdmin = req.user.role === 'admin' || req.user.role === 'owner';
 
     if (isAdmin) {
         // Se é Admin, ele TEM que mandar o store_id pelo dropdown

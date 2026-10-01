@@ -159,7 +159,7 @@ const swaggerDocument = {
                   name: { type: 'string', example: 'Novo Funcionário' },
                   email: { type: 'string', example: 'novo@loja.com' },
                   password: { type: 'string', example: 'senha123' },
-                  role: { type: 'string', enum: ['admin', 'proprietario', 'atendente'], example: 'atendente' },
+                  role: { type: 'string', enum: ['admin', 'owner', 'attendant'], example: 'attendant' },
                   store_id: { type: 'string', format: 'uuid' },
                 },
               },
@@ -187,7 +187,7 @@ const swaggerDocument = {
                 type: 'object',
                 properties: {
                   name: { type: 'string' },
-                  role: { type: 'string', enum: ['admin', 'proprietario', 'atendente'] },
+                  role: { type: 'string', enum: ['admin', 'owner', 'attendant'] },
                 },
               },
             },
@@ -397,7 +397,7 @@ const swaggerDocument = {
                   delivery_address_id: { type: 'string', format: 'uuid', nullable: true, description: 'ID do endereço de entrega (opcional)' },
                   delivery_type: { type: 'string', enum: ['pickup_store', 'delivery', 'shipping'], default: 'pickup_store', description: 'Tipo de entrega/retirada' },
                   laundry_days_needed: { type: 'integer', default: 2, minimum: 0, description: 'Dias necessários para lavanderia após devolução' },
-                  store_id: { type: 'string', format: 'uuid', description: 'ID da loja. Obrigatório se o usuário logado não tiver store_id associado no token JWT. Preenchido automaticamente se o usuário (atendente) pertencer a uma loja.' },
+                  store_id: { type: 'string', format: 'uuid', description: 'ID da loja. Obrigatório se o usuário logado não tiver store_id associado no token JWT. Preenchido automaticamente se o usuário (attendant) pertencer a uma loja.' },
                   user_id: { type: 'string', format: 'uuid', description: 'ID do vendedor. Preenchido automaticamente pelo usuário autenticado (req.user.id).' },
                   installments_config: {
                     type: 'object',

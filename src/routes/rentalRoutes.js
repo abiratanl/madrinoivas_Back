@@ -17,7 +17,7 @@ router.post('/:id/extend', rentalController.extendRental);
 router.post('/:id/return', rentalController.returnRental);
 router.post('/:id/cancel', rentalController.cancelRental);
 
-// Hard Delete - Apenas admin/proprietario e status cancelled
-router.delete('/:id', restrictTo('admin', 'proprietario'), rentalController.deleteRental);
+// Hard Delete - Apenas admin/owner e status cancelled
+router.delete('/:id', restrictTo('admin', 'owner'), rentalController.deleteRental);
 
 module.exports = router;
