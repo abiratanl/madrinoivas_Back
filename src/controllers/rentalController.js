@@ -222,3 +222,30 @@ exports.cancelRental = async (req, res) => {
     res.status(500).json({ message: 'Erro ao cancelar aluguel.' });
   }
 };
+
+exports.deleteRental = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const rental = await Rental.findById(id);
+
+    if (!rental) return res.status(404).json({ message: 'Aluguel não encontrado' });
+
+    if (req.user.storeId && rental.store_id !== req.user.storeId) {
+      return res.status(403).json({ message: 'Acesso negado.' });
+    }
+
+    // Apenas status 'cancelled' pode ser excluído permanentemente
+    if (rental.status !== 'cancelled') {
+      return res.status(400).json({ 
+        message: 'Apenas itens cancelados podem ser excluídos permanentemente. Cancele o aluguel primeiro.' 
+      });
+    }
+
+    await Rental.deleteRental(id);
+
+    res.status(200).json({ status: 'success', message: 'Aluguel excluído permanentemente.' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: error.message || 'Erro ao excluir aluguel.' });
+  }
+};

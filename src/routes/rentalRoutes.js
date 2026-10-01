@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const rentalController = require('../controllers/rentalController');
-const { protect } = require('../middlewares/authMiddleware');
+const { protect, restrictTo } = require('../middlewares/authMiddleware');
 
 router.use(protect);
 
@@ -16,5 +16,8 @@ router.post('/:id/pickup', rentalController.pickUpRental);
 router.post('/:id/extend', rentalController.extendRental); 
 router.post('/:id/return', rentalController.returnRental);
 router.post('/:id/cancel', rentalController.cancelRental);
+
+// Hard Delete - Apenas admin/proprietario e status cancelled
+router.delete('/:id', restrictTo('admin', 'proprietario'), rentalController.deleteRental);
 
 module.exports = router;

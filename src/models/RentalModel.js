@@ -464,6 +464,47 @@ class RentalModel {
       throw error;
     }
   }
+
+  /**
+   * HARD DELETE - Exclusão física (apenas para admin/proprietario e status cancelled)
+   */
+  static async deleteRental(id) {
+    const conn = await db.getConnection();
+    try {
+      await conn.beginTransaction();
+
+      // 1. Verifica se existe e status
+      const [rentalRows] = await conn.query(
+        `SELECT id, status FROM rentals WHERE id = ? FOR UPDATE`,
+        [id]
+      );
+      if (rentalRows.length === 0) {
+        throw new Error('Aluguel não encontrado');
+      }
+      const rental = rentalRows[0];
+      if (rental.status !== 'cancelled') {
+        throw new Error('Apenas itens cancelados podem ser excluídos permanentemente');
+      }
+
+      // 2. Deleta itens do aluguel (rental_items)
+      await conn.query('DELETE FROM rental_items WHERE rental_id = ?', [id]);
+
+      // 3. Deleta parcelas/financeiro (installments)
+      await conn.query('DELETE FROM installments WHERE rental_id = ?', [id]);
+
+      // 4. Deleta o aluguel
+      await conn.query('DELETE FROM rentals WHERE id = ?', [id]);
+
+      await conn.commit();
+      conn.release();
+      return true;
+
+    } catch (error) {
+      await conn.rollback();
+      conn.release();
+      throw error;
+    }
+  }
 }
 
 module.exports = RentalModel;
