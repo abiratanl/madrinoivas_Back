@@ -85,8 +85,14 @@ if (process.env.NODE_ENV !== 'production') {
 // ==================================================================================
 // 2º LUGAR: SECURITY & TRAFFIC CONTROL
 // Protege os endpoints de negócio (/api/users, /api/auth...) sem interferir no Swagger
+// Exclui /api/auth que já tem rate limiter específico (loginLimiter)
 // ==================================================================================
-app.use('/api', apiLimiter);
+app.use('/api', (req, res, next) => {
+  if (req.path.startsWith('/auth')) {
+    return next();
+  }
+  return apiLimiter(req, res, next);
+});
 
 // --- ROOT ENDPOINT ---
 app.get('/', (req, res) => {
