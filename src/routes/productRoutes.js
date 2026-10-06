@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const productController = require('../controllers/productController');
+const transferController = require('../controllers/transferController');
 const { protect } = require('../middlewares/authMiddleware');
 
 // 1. Importamos os middlewares de imagem
@@ -34,5 +35,10 @@ router.put('/:id',
 );
 
 router.delete('/:id', productController.deleteProduct);
+
+// --- ROTAS DE TRANSFERÊNCIA (Frontend: POST /products/:id/transfer e /products/:id/receive) ---
+router.post('/:productId/transfer', transferController.requestTransferFromProduct);
+router.post('/:productId/receive', transferController.receiveTransferFromProduct);
+router.get('/:productId/transfers', transferController.getTransfersByProduct);
 
 module.exports = router;
