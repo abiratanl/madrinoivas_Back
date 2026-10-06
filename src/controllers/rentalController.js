@@ -182,11 +182,16 @@ exports.returnRental = async (req, res) => {
 
     // Lê a multa do corpo da requisição (opcional)
     const penaltyFee = parseFloat(req.body.penalty_fee) || 0;
+    // Opção de tornar produtos disponíveis imediatamente
+    const makeAvailable = req.body.makeAvailable === true;
 
-    const result = await Rental.returnRental(id, penaltyFee);
+    const result = await Rental.returnRental(id, penaltyFee, makeAvailable);
+    const message = makeAvailable 
+      ? 'Devolução registrada. Produtos disponíveis para novo aluguel.'
+      : 'Devolução registrada. Produtos enviados para lavanderia.';
     res.status(200).json({ 
       status: 'success', 
-      message: 'Devolução registrada. Produtos enviados para lavanderia.',
+      message,
       penaltyFee: result.penaltyFee
     });
   } catch (error) {

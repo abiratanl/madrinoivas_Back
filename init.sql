@@ -124,7 +124,7 @@ CREATE TABLE IF NOT EXISTS `products` (
   `store_id` char(36) NOT NULL,
   `category_id` char(36) NOT NULL,
   `code` varchar(50) DEFAULT NULL,
-  `status` enum('available','rented','maintenance','sold') DEFAULT 'available',
+  `status` enum('available','rented','maintenance','discarded','transferring','reserved') DEFAULT 'available',
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),

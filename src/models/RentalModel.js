@@ -184,11 +184,15 @@ class RentalModel {
     try {
       await conn.beginTransaction();
       // 1. Atualiza status do aluguel
-      await conn.query("UPDATE rentals SET status = 'picked_up' WHERE id = ? AND status IN ('reserved', 'budget')", [id]);
+      const [result] = await conn.query("UPDATE rentals SET status = 'picked_up' WHERE id = ? AND status IN ('reserved', 'budget')", [id]);
+      if (result.affectedRows === 0) {
+        throw new Error('Aluguel não encontrado ou status não permite retirada');
+      }
 
-      // 2. Atualiza produtos: de 'reserved' ou 'budget' vão para 'rented' (em uso pelo cliente)
+      // 2. Atualiza produtos: define como 'rented' (em uso pelo cliente)
+      // Remove a restrição de status anterior para garantir que todos os itens do aluguel sejam atualizados
       await conn.query(
-        "UPDATE products p JOIN rental_items ri ON p.id = ri.product_id SET p.status = 'rented' WHERE ri.rental_id = ? AND p.status IN ('reserved', 'budget')",
+        "UPDATE products p JOIN rental_items ri ON p.id = ri.product_id SET p.status = 'rented' WHERE ri.rental_id = ?",
         [id]
       );
 
@@ -209,7 +213,7 @@ class RentalModel {
     const conn = await db.getConnection();
     try {
       await conn.beginTransaction();
-      const { discount, notes, end_date_scheduled, items, status, penalty_fee } = data;
+      const { discount, notes, end_date_scheduled, items, status, penalty_fee, start_date } = data;
 
       // 1. Valida se aluguel pode ser editado (não picked_up/returned/cancelled)
       const [rentalRows] = await conn.query(
@@ -223,14 +227,28 @@ class RentalModel {
         throw new Error('Não é possível editar um aluguel em andamento ou finalizado');
       }
 
+      const newStatus = status || rental.status;
+      const checkStartDate = start_date || rental.start_date;
+      const checkEndDate = end_date_scheduled || rental.end_date_scheduled;
+
       // 2. Se vierem novos itens, substitui os antigos
       if (items && items.length > 0) {
+        // 2a. Libera os produtos antigos (volta para 'available')
+        const [oldItems] = await conn.query(
+          `SELECT product_id FROM rental_items WHERE rental_id = ?`,
+          [id]
+        );
+        for (const oldItem of oldItems) {
+          await conn.query(
+            `UPDATE products SET status = 'available' WHERE id = ? AND status IN ('reserved', 'rented')`,
+            [oldItem.product_id]
+          );
+        }
+
+        // 2b. Remove os itens antigos
         await conn.query("DELETE FROM rental_items WHERE rental_id = ?", [id]);
         
-        const checkStartDate = data.start_date || rental.start_date;
-        const checkEndDate = end_date_scheduled || rental.end_date_scheduled;
-        const newStatus = status || rental.status;
-        
+        // 2c. Valida e insere os novos itens com atualização de status
         for (const item of items) {
           // Validar sobreposição de datas (exceto budget)
           if (newStatus !== 'budget') {
@@ -263,10 +281,47 @@ class RentalModel {
             `INSERT INTO rental_items (id, rental_id, product_id, unit_price, quantity) VALUES (?, ?, ?, ?, ?)`,
             [uuidv4(), id, item.product_id, item.unit_price, item.quantity || 1]
           );
+
+          // 2d. Atualiza status do produto conforme status do aluguel
+          if (newStatus !== 'budget') {
+            const productStatus = newStatus === 'picked_up' ? 'rented' : 'reserved';
+            await conn.query(
+              `UPDATE products SET status = ? WHERE id = ? AND status = 'available'`,
+              [productStatus, item.product_id]
+            );
+          }
         }
       }
 
-      // 3. Recalcula total baseado nos itens ATUAIS do banco (segurança contra manipulação)
+      // 3. Se o status mudou de/para budget mas itens não foram enviados, atualiza status dos produtos existentes
+      if (rental.status !== newStatus && (rental.status === 'budget' || newStatus === 'budget')) {
+        const [currentItems] = await conn.query(
+          `SELECT product_id FROM rental_items WHERE rental_id = ?`,
+          [id]
+        );
+        if (currentItems.length > 0) {
+          if (newStatus === 'budget') {
+            // Voltando para orçamento - libera produtos
+            for (const item of currentItems) {
+              await conn.query(
+                `UPDATE products SET status = 'available' WHERE id = ? AND status IN ('reserved', 'rented')`,
+                [item.product_id]
+              );
+            }
+          } else {
+            // Saindo do orçamento - reserva produtos
+            const productStatus = newStatus === 'picked_up' ? 'rented' : 'reserved';
+            for (const item of currentItems) {
+              await conn.query(
+                `UPDATE products SET status = ? WHERE id = ? AND status = 'available'`,
+                [productStatus, item.product_id]
+              );
+            }
+          }
+        }
+      }
+
+      // 4. Recalcula total baseado nos itens ATUAIS do banco (segurança contra manipulação)
       const [sumResult] = await conn.query(
         "SELECT COALESCE(SUM(unit_price * quantity), 0) as total FROM rental_items WHERE rental_id = ?",
         [id]
@@ -365,7 +420,7 @@ class RentalModel {
   /**
    * DEVOLUÇÃO (Corrigido para usar end_date_real e aceitar multa)
    */
-  static async returnRental(id, penaltyFee = 0) {
+  static async returnRental(id, penaltyFee = 0, makeAvailable = false) {
     const conn = await db.getConnection();
     try {
       await conn.beginTransaction();
@@ -395,10 +450,11 @@ class RentalModel {
         }
       }
 
-      // 3. Produtos -> lavanderia
+      // 3. Atualiza status dos produtos conforme opção
       const [items] = await conn.query('SELECT product_id FROM rental_items WHERE rental_id = ?', [id]);
+      const targetStatus = makeAvailable ? 'available' : 'maintenance';
       for (const item of items) {
-        await conn.query("UPDATE products SET status = 'laundry' WHERE id = ?", [item.product_id]);
+        await conn.query("UPDATE products SET status = ? WHERE id = ?", [targetStatus, item.product_id]);
       }
 
       // 4. Finaliza aluguel com data real e multa calculada

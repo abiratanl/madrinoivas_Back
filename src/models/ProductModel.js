@@ -32,6 +32,12 @@ static async findAll(filters = {}) {
         values.push(filters.category_id);
     }
 
+    // 3. Filtro de Status
+    if (filters.status && filters.status !== '') {
+        query += ` AND p.status = ?`;
+        values.push(filters.status);
+    }
+
     query += ` ORDER BY p.created_at DESC`;
 
     // Debug: Mostra no terminal a query que está sendo feita
