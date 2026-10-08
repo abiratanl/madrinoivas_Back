@@ -32,7 +32,7 @@ describe('Product Transfer Flow (Logistics)', () => {
 
     // 2. Mocks de Sucesso nas gravações
     ProductModel.update.mockResolvedValue(true);
-    TransferModel.create.mockResolvedValue({ id: 'transf-1', status: 'in_transit' });
+    TransferModel.create.mockResolvedValue({ id: 'transf-1', status: 'active' });
 
     // 3. Atendente da Loja B pede o produto para a Loja B
     const res = await request(app).post('/api/transfers/request').send({
@@ -71,7 +71,7 @@ describe('Product Transfer Flow (Logistics)', () => {
       id: 'transf-1',
       product_id: 'prod-1',
       to_store_id: 'store-B', // Destino bate com o usuário logado (store-B)
-      status: 'in_transit'
+      status: 'active'
     });
 
     ProductModel.update.mockResolvedValue(true);
@@ -92,6 +92,6 @@ describe('Product Transfer Flow (Logistics)', () => {
     });
     
     // A transferência deve ser finalizada
-    expect(TransferModel.updateStatus).toHaveBeenCalledWith('transf-1', 'completed', expect.any(Date));
+    expect(TransferModel.updateStatus).toHaveBeenCalledWith('transf-1', 'completed', expect.any(Date), 'user-2');
   });
 });

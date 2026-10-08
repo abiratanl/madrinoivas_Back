@@ -65,7 +65,7 @@ exports.receiveTransfer = async (req, res) => {
       return res.status(404).json({ message: 'Transferência não encontrada.' });
     }
 
-    if (transfer.status !== 'in_transit') {
+    if (transfer.status !== 'active') {
       return res.status(400).json({ message: 'Esta transferência já foi concluída ou cancelada.' });
     }
 
@@ -112,7 +112,7 @@ exports.getMyTransfers = async (req, res) => {
       filters.to_store_id = userStoreId;
     }
     
-    // Podemos passar status via query (ex: ?status=in_transit)
+    // Podemos passar status via query (ex: ?status=active)
     if (req.query.status) {
       filters.status = req.query.status;
     }
@@ -196,7 +196,7 @@ exports.receiveTransferFromProduct = async (req, res) => {
       return res.status(400).json({ message: 'Transferência não corresponde a este produto.' });
     }
 
-    if (transfer.status !== 'in_transit') {
+    if (transfer.status !== 'active') {
       return res.status(400).json({ message: 'Esta transferência já foi concluída ou cancelada.' });
     }
 
