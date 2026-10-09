@@ -1,5 +1,6 @@
 const db = require('../config/database');
 const { v4: uuidv4 } = require('uuid');
+const Product = require('./ProductModel');
 
 class TransferModel {
   static async create(data) {
@@ -14,6 +15,48 @@ class TransferModel {
 
     await db.query(sql, [id, product_id, from_store_id, to_store_id, requested_by, notes || null]);
     return { id, ...data, status: 'active' };
+  }
+
+  static async cancelTransfer(transferId, userId) {
+    const connection = await db.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      // 1. Get transfer with product info
+      const [transferRows] = await connection.query(
+        'SELECT * FROM product_transfers WHERE id = ?',
+        [transferId],
+      );
+
+      if (!transferRows[0]) {
+        throw new Error('NOT_FOUND');
+      }
+
+      const transfer = transferRows[0];
+
+      if (transfer.status !== 'active') {
+        throw new Error('INVALID_STATUS');
+      }
+
+      // 2. Update transfer: status='cancelled', cancelled_by, cancelled_at
+      const updateTransferSql = `
+        UPDATE product_transfers 
+        SET status = 'cancelled', cancelled_by = ?, cancelled_at = NOW() 
+        WHERE id = ?
+      `;
+      await connection.query(updateTransferSql, [userId, transferId]);
+
+      // 3. Update product: status='available'
+      await Product.update(transfer.product_id, { status: 'available' }, connection);
+
+      await connection.commit();
+      return { productId: transfer.product_id };
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
   }
 
   static async findById(id) {
@@ -48,7 +91,7 @@ class TransferModel {
     `;
     const [rows] = await db.query(sql, [id]);
     if (!rows[0]) return null;
-    
+
     const row = rows[0];
     const product = {
       id: row.product_id,
@@ -72,22 +115,42 @@ class TransferModel {
       updated_at: row.updated_at,
       category_name: row.category_name,
       image_url: row.image_url,
-      images: []
+      images: [],
     };
-    
-    const { 
-      code, name, description, size, color, brand, model, 
-      purchase_price, rental_price, sale_price, accessories,
-      category_id, store_id, is_featured, 
-      category_name, image_url,
-      from_store_name, to_store_name, 
-      requested_by_name, received_by_name,
-      ...transferFields 
+
+    const {
+      code,
+      name,
+      description,
+      size,
+      color,
+      brand,
+      model,
+      purchase_price,
+      rental_price,
+      sale_price,
+      accessories,
+      category_id,
+      store_id,
+      is_featured,
+      category_name,
+      image_url,
+      from_store_name,
+      to_store_name,
+      requested_by_name,
+      received_by_name,
+      ...transferFields
     } = row;
-    
+
     transferFields.product = product;
+    transferFields.from_store = from_store_name
+      ? { id: row.from_store_id, name: from_store_name }
+      : undefined;
+    transferFields.to_store = to_store_name
+      ? { id: row.to_store_id, name: to_store_name }
+      : undefined;
     transferFields.status = row.transfer_status;
-    
+
     return transferFields;
   }
 
@@ -133,7 +196,7 @@ class TransferModel {
       sql += ' AND t.to_store_id = ?';
       params.push(filters.to_store_id);
     }
-    
+
     // Filtro: Ver o que enviei
     if (filters.from_store_id) {
       sql += ' AND t.from_store_id = ?';
@@ -154,9 +217,9 @@ class TransferModel {
     sql += ' ORDER BY t.requested_at DESC';
 
     const [rows] = await db.query(sql, params);
-    
+
     // Transformar linhas planas em objeto com product aninhado
-    return rows.map(row => {
+    return rows.map((row) => {
       const product = {
         id: row.product_id,
         product_id: row.product_id,
@@ -179,26 +242,46 @@ class TransferModel {
         updated_at: row.updated_at,
         category_name: row.category_name,
         image_url: row.image_url,
-        images: [] // não incluímos imagens adicionais aqui para evitar duplicação
+        images: [], // não incluímos imagens adicionais aqui para evitar duplicação
       };
-      
+
       // Extrair apenas campos da transferência (não do produto)
-      const { 
-        code, name, description, size, color, brand, model, 
-        purchase_price, rental_price, sale_price, accessories,
-        category_id, store_id, is_featured, 
-        category_name, image_url,
+      const {
+        code,
+        name,
+        description,
+        size,
+        color,
+        brand,
+        model,
+        purchase_price,
+        rental_price,
+        sale_price,
+        accessories,
+        category_id,
+        store_id,
+        is_featured,
+        category_name,
+        image_url,
         // campos de join que não são da transferência
-        from_store_name, to_store_name, 
-        requested_by_name, received_by_name,
-        ...transferFields 
+        from_store_name,
+        to_store_name,
+        requested_by_name,
+        received_by_name,
+        ...transferFields
       } = row;
-      
+
       // Renomear id do produto para não conflitar com id da transferência
       transferFields.product = product;
       transferFields.product.id = row.product_id;
+      transferFields.from_store = from_store_name
+        ? { id: row.from_store_id, name: from_store_name }
+        : undefined;
+      transferFields.to_store = to_store_name
+        ? { id: row.to_store_id, name: to_store_name }
+        : undefined;
       transferFields.status = row.transfer_status;
-      
+
       return transferFields;
     });
   }
@@ -221,6 +304,28 @@ class TransferModel {
     params.push(id);
 
     const [result] = await db.query(sql, params);
+    return result.affectedRows > 0;
+  }
+
+  static async update(id, data) {
+    const fields = [];
+    const values = [];
+
+    const allowedFields = ['to_store_id', 'notes'];
+
+    for (const field of allowedFields) {
+      if (data[field] !== undefined) {
+        fields.push(`${field} = ?`);
+        values.push(data[field]);
+      }
+    }
+
+    if (fields.length === 0) return false;
+
+    values.push(id);
+    const sql = `UPDATE product_transfers SET ${fields.join(', ')} WHERE id = ?`;
+
+    const [result] = await db.query(sql, values);
     return result.affectedRows > 0;
   }
 }

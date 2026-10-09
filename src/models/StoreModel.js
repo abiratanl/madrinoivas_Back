@@ -1,4 +1,4 @@
-const db = require('../config/database'); 
+const db = require('../config/database');
 const { v4: uuidv4 } = require('uuid');
 const AddressModel = require('./AddressModel');
 
@@ -16,11 +16,16 @@ class Store {
     }
     query += ` ORDER BY s.name ASC`;
     const [rows] = await db.execute(query);
-    
-    return rows.map(row => ({
+
+    return rows.map((row) => ({
       ...row,
-      address: row.address_id ? `${row.street || ''}, ${row.number || ''}${row.complement ? ' ' + row.complement : ''}${row.neighborhood ? ' - ' + row.neighborhood : ''}, ${row.city || ''} - ${row.state || ''}${row.zip_code ? ' ' + row.zip_code : ''}`.replace(/^, |, $/g, '') : null,
-      addresses: row.address_id ? [{...row}] : []
+      address: row.address_id
+        ? `${row.street || ''}, ${row.number || ''}${row.complement ? ' ' + row.complement : ''}${row.neighborhood ? ' - ' + row.neighborhood : ''}, ${row.city || ''} - ${row.state || ''}${row.zip_code ? ' ' + row.zip_code : ''}`.replace(
+            /^, |, $/g,
+            '',
+          )
+        : null,
+      addresses: row.address_id ? [{ ...row }] : [],
     }));
   }
 
@@ -28,7 +33,7 @@ class Store {
     // Get store
     const [storeRows] = await db.execute(
       'SELECT id, name, phone, is_active, created_at, updated_at FROM stores WHERE id = ?',
-      [id]
+      [id],
     );
     if (!storeRows[0]) return null;
     const store = storeRows[0];
@@ -36,15 +41,20 @@ class Store {
     // Get all addresses for this store
     const [addressRows] = await db.execute(
       'SELECT * FROM addresses WHERE store_id = ? ORDER BY is_default DESC',
-      [id]
+      [id],
     );
 
     const primaryAddress = addressRows[0];
-    
+
     return {
       ...store,
-      address: primaryAddress ? `${primaryAddress.street || ''}, ${primaryAddress.number || ''}${primaryAddress.complement ? ' ' + primaryAddress.complement : ''}${primaryAddress.neighborhood ? ' - ' + primaryAddress.neighborhood : ''}, ${primaryAddress.city || ''} - ${primaryAddress.state || ''}${primaryAddress.zip_code ? ' ' + primaryAddress.zip_code : ''}`.replace(/^, |, $/g, '') : null,
-      addresses: addressRows
+      address: primaryAddress
+        ? `${primaryAddress.street || ''}, ${primaryAddress.number || ''}${primaryAddress.complement ? ' ' + primaryAddress.complement : ''}${primaryAddress.neighborhood ? ' - ' + primaryAddress.neighborhood : ''}, ${primaryAddress.city || ''} - ${primaryAddress.state || ''}${primaryAddress.zip_code ? ' ' + primaryAddress.zip_code : ''}`.replace(
+            /^, |, $/g,
+            '',
+          )
+        : null,
+      addresses: addressRows,
     };
   }
 
@@ -52,7 +62,7 @@ class Store {
     const conn = await db.getConnection();
     try {
       await conn.beginTransaction();
-      
+
       const { name, phone, addresses } = storeData;
       const id = uuidv4();
 
@@ -71,7 +81,15 @@ class Store {
       }
 
       await conn.commit();
-      return { id, name, phone, is_active: 1, created_at: new Date(), updated_at: new Date(), addresses: addresses || [] };
+      return {
+        id,
+        name,
+        phone,
+        is_active: 1,
+        created_at: new Date(),
+        updated_at: new Date(),
+        addresses: addresses || [],
+      };
     } catch (error) {
       await conn.rollback();
       throw error;
@@ -112,7 +130,7 @@ class Store {
       if (data.addresses) {
         // Delete existing addresses for this store
         await AddressModel.deleteByStoreId(id, conn);
-        
+
         // Create new addresses
         for (const addr of data.addresses) {
           await AddressModel.create({ ...addr, store_id: id }, conn);
@@ -133,6 +151,31 @@ class Store {
     const query = `UPDATE stores SET is_active = NOT is_active, updated_at = CURRENT_TIMESTAMP WHERE id = ?`;
     const [result] = await db.execute(query, [id]);
     return result.affectedRows > 0;
+  }
+
+  // NOVO: Buscar lojas para transferência (todas ativas exceto a do usuário)
+  static async findAllForTransfer(excludeStoreId) {
+    const query = `
+      SELECT s.id, s.name, s.phone, s.is_active, s.created_at, s.updated_at,
+             a.id as address_id, a.street, a.number, a.complement, a.neighborhood, a.city, a.state, a.zip_code,
+             a.type, a.label, a.is_default
+      FROM stores s
+      LEFT JOIN addresses a ON a.store_id = s.id AND a.is_default = 1
+      WHERE s.is_active = 1 AND s.id != ?
+      ORDER BY s.name ASC
+    `;
+    const [rows] = await db.execute(query, [excludeStoreId]);
+
+    return rows.map((row) => ({
+      ...row,
+      address: row.address_id
+        ? `${row.street || ''}, ${row.number || ''}${row.complement ? ' ' + row.complement : ''}${row.neighborhood ? ' - ' + row.neighborhood : ''}, ${row.city || ''} - ${row.state || ''}${row.zip_code ? ' ' + row.zip_code : ''}`.replace(
+            /^, |, $/g,
+            '',
+          )
+        : null,
+      addresses: row.address_id ? [{ ...row }] : [],
+    }));
   }
 }
 

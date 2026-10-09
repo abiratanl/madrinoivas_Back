@@ -19,7 +19,9 @@ exports.requestTransfer = async (req, res) => {
     }
 
     if (product.status !== 'available') {
-      return res.status(400).json({ message: `Produto não está disponível (Status atual: ${product.status}).` });
+      return res
+        .status(400)
+        .json({ message: `Produto não está disponível (Status atual: ${product.status}).` });
     }
 
     if (product.store_id === to_store_id) {
@@ -27,7 +29,7 @@ exports.requestTransfer = async (req, res) => {
     }
 
     // --- LÓGICA DE TRANSAÇÃO ---
-    
+
     // A. Atualiza status do produto para 'transferring' (Bloqueia alugueres)
     await Product.update(product_id, { status: 'transferring' });
 
@@ -36,15 +38,14 @@ exports.requestTransfer = async (req, res) => {
       product_id,
       from_store_id: product.store_id,
       to_store_id,
-      requested_by: requesterId
+      requested_by: requesterId,
     });
 
-    res.status(201).json({ 
-      status: 'success', 
+    res.status(201).json({
+      status: 'success',
       message: 'Transferência iniciada. Produto em trânsito.',
-      data: newTransfer 
+      data: newTransfer,
     });
-
   } catch (error) {
     console.error('Erro ao solicitar transferência:', error);
     // Idealmente, faríamos rollback aqui se o passo A funcionasse e o B falhasse
@@ -72,28 +73,30 @@ exports.receiveTransfer = async (req, res) => {
     // Segurança: Apenas alguém da loja de destino pode confirmar o recebimento
     // (A menos que seja admin ou owner global)
     const userRole = req.user.role;
-    const isAdminOrOwner = userRole === 'admin' || userRole === 'owner' || userRole === 'proprietario';
-    
+    const isAdminOrOwner =
+      userRole === 'admin' || userRole === 'owner' || userRole === 'proprietario';
+
     if (userStoreId && userStoreId !== transfer.to_store_id && !isAdminOrOwner) {
-      return res.status(403).json({ message: 'Apenas funcionários da loja de destino podem receber o produto.' });
+      return res
+        .status(403)
+        .json({ message: 'Apenas funcionários da loja de destino podem receber o produto.' });
     }
 
     // --- LÓGICA DE FINALIZAÇÃO ---
 
     // A. Atualiza o produto: Novo dono (store_id) e volta a ficar disponível
     await Product.update(transfer.product_id, {
-      store_id: transfer.to_store_id, 
-      status: 'available'
+      store_id: transfer.to_store_id,
+      status: 'available',
     });
 
     // B. Atualiza a transferência para concluída
     await Transfer.updateStatus(transfer_id, 'completed', new Date(), userId);
 
-    res.status(200).json({ 
-      status: 'success', 
-      message: 'Produto recebido com sucesso! Estoque atualizado.' 
+    res.status(200).json({
+      status: 'success',
+      message: 'Produto recebido com sucesso! Estoque atualizado.',
     });
-
   } catch (error) {
     console.error('Erro ao receber transferência:', error);
     res.status(500).json({ status: 'error', message: 'Erro interno.' });
@@ -111,7 +114,7 @@ exports.getMyTransfers = async (req, res) => {
       // Simplificação: vamos buscar o que está "Para mim"
       filters.to_store_id = userStoreId;
     }
-    
+
     // Podemos passar status via query (ex: ?status=active)
     if (req.query.status) {
       filters.status = req.query.status;
@@ -119,7 +122,6 @@ exports.getMyTransfers = async (req, res) => {
 
     const transfers = await Transfer.findAll(filters);
     res.status(200).json({ status: 'success', data: transfers });
-
   } catch (error) {
     console.error('Erro ao listar transferências:', error);
     res.status(500).json({ status: 'error', message: 'Erro interno.' });
@@ -147,7 +149,9 @@ exports.requestTransferFromProduct = async (req, res) => {
     // Permitir transferência de: available, reserved, maintenance
     const allowedStatuses = ['available', 'reserved', 'maintenance'];
     if (!allowedStatuses.includes(product.status)) {
-      return res.status(400).json({ message: `Produto não pode ser transferido (Status atual: ${product.status}).` });
+      return res
+        .status(400)
+        .json({ message: `Produto não pode ser transferido (Status atual: ${product.status}).` });
     }
 
     if (product.store_id === to_store_id) {
@@ -163,15 +167,14 @@ exports.requestTransferFromProduct = async (req, res) => {
       from_store_id: product.store_id,
       to_store_id,
       requested_by: requesterId,
-      notes: notes || null
+      notes: notes || null,
     });
 
-    res.status(201).json({ 
-      status: 'success', 
+    res.status(201).json({
+      status: 'success',
       message: 'Transferência iniciada. Produto em trânsito.',
-      data: newTransfer 
+      data: newTransfer,
     });
-
   } catch (error) {
     console.error('Erro ao solicitar transferência:', error);
     res.status(500).json({ status: 'error', message: 'Erro interno ao processar transferência.' });
@@ -203,26 +206,28 @@ exports.receiveTransferFromProduct = async (req, res) => {
     // Segurança: Apenas alguém da loja de destino pode confirmar o recebimento
     // (A menos que seja admin ou owner global)
     const userRole = req.user.role;
-    const isAdminOrOwner = userRole === 'admin' || userRole === 'owner' || userRole === 'proprietario';
-    
+    const isAdminOrOwner =
+      userRole === 'admin' || userRole === 'owner' || userRole === 'proprietario';
+
     if (userStoreId && userStoreId !== transfer.to_store_id && !isAdminOrOwner) {
-      return res.status(403).json({ message: 'Apenas funcionários da loja de destino podem receber o produto.' });
+      return res
+        .status(403)
+        .json({ message: 'Apenas funcionários da loja de destino podem receber o produto.' });
     }
 
     // A. Atualiza o produto: Novo dono (store_id) e volta a ficar disponível
     await Product.update(transfer.product_id, {
-      store_id: transfer.to_store_id, 
-      status: 'available'
+      store_id: transfer.to_store_id,
+      status: 'available',
     });
 
     // B. Atualiza a transferência para concluída
     await Transfer.updateStatus(transfer_id, 'completed', new Date(), userId);
 
-    res.status(200).json({ 
-      status: 'success', 
-      message: 'Produto recebido com sucesso! Estoque atualizado.' 
+    res.status(200).json({
+      status: 'success',
+      message: 'Produto recebido com sucesso! Estoque atualizado.',
     });
-
   } catch (error) {
     console.error('Erro ao receber transferência:', error);
     res.status(500).json({ status: 'error', message: 'Erro interno.' });
@@ -233,14 +238,143 @@ exports.receiveTransferFromProduct = async (req, res) => {
 exports.getTransfersByProduct = async (req, res) => {
   try {
     const { productId } = req.params;
-    
+
     // Reutiliza o findAll filtrando por product_id
     const transfers = await Transfer.findAll({ product_id: productId });
     res.status(200).json({ status: 'success', data: transfers });
-
   } catch (error) {
     console.error('Erro ao listar transferências do produto:', error);
     res.status(500).json({ status: 'error', message: 'Erro interno.' });
+  }
+};
+
+// 7. Cancelar Transferência (Frontend: PATCH /transfers/:id/cancel)
+exports.cancelTransfer = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+    const userRole = req.user.role;
+    const userStoreId = req.user.storeId;
+
+    const transfer = await Transfer.findById(id);
+
+    if (!transfer) {
+      return res.status(404).json({ message: 'Transferência não encontrada.' });
+    }
+
+    if (transfer.status !== 'active') {
+      return res
+        .status(400)
+        .json({ message: 'Apenas transferências ativas podem ser canceladas.' });
+    }
+
+    // Verificar se o produto está em 'transferring'
+    if (transfer.product && transfer.product.status !== 'transferring') {
+      return res.status(400).json({ message: 'Produto não está em transferência.' });
+    }
+
+    // Segurança: admin/owner OU pertence à loja de origem
+    const isAdminOrOwner =
+      userRole === 'admin' || userRole === 'owner' || userRole === 'proprietario';
+    const isFromStore = userStoreId && String(userStoreId) === String(transfer.from_store_id);
+
+    if (!isAdminOrOwner && !isFromStore) {
+      return res
+        .status(403)
+        .json({ message: 'Você não tem permissão para cancelar esta transferência.' });
+    }
+
+    // Usar transaction no model
+    await Transfer.cancelTransfer(id, userId);
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Transferência cancelada com sucesso! Produto disponível novamente.',
+      data: { transferId: id, productId: transfer.product_id },
+    });
+  } catch (error) {
+    console.error('Erro ao cancelar transferência:', error);
+
+    if (error.message === 'NOT_FOUND') {
+      return res.status(404).json({ message: 'Transferência não encontrada.' });
+    }
+    if (error.message === 'INVALID_STATUS') {
+      return res
+        .status(400)
+        .json({ message: 'Apenas transferências ativas podem ser canceladas.' });
+    }
+
+    res.status(500).json({ status: 'error', message: 'Erro interno ao cancelar transferência.' });
+  }
+};
+
+// 8. Atualizar Transferência (Frontend: PUT /transfers/:id)
+exports.updateTransfer = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { to_store_id, notes } = req.body;
+    const userRole = req.user.role;
+    const userStoreId = req.user.storeId;
+
+    const transfer = await Transfer.findById(id);
+
+    if (!transfer) {
+      return res.status(404).json({ message: 'Transferência não encontrada.' });
+    }
+
+    if (transfer.status !== 'active') {
+      return res.status(400).json({ message: 'Apenas transferências ativas podem ser editadas.' });
+    }
+
+    // Segurança: admin/owner OU pertence à loja de origem
+    const isAdminOrOwner =
+      userRole === 'admin' || userRole === 'owner' || userRole === 'proprietario';
+    const isFromStore = userStoreId && String(userStoreId) === String(transfer.from_store_id);
+
+    if (!isAdminOrOwner && !isFromStore) {
+      return res
+        .status(403)
+        .json({ message: 'Você não tem permissão para editar esta transferência.' });
+    }
+
+    // Validar se to_store_id é diferente da loja atual do produto
+    if (to_store_id && String(to_store_id) === String(transfer.product.store_id)) {
+      return res.status(400).json({ message: 'O produto já se encontra na loja de destino.' });
+    }
+
+    // Validar se to_store_id é diferente da loja de origem
+    if (to_store_id && String(to_store_id) === String(transfer.from_store_id)) {
+      return res
+        .status(400)
+        .json({ message: 'A loja de destino deve ser diferente da loja de origem.' });
+    }
+
+    // Validar se to_store_id existe (opcional - verificar se a loja existe)
+    if (to_store_id) {
+      const Store = require('../models/StoreModel');
+      const store = await Store.findById(to_store_id);
+      if (!store) {
+        return res.status(404).json({ message: 'Loja de destino não encontrada.' });
+      }
+    }
+
+    const updateData = {};
+    if (to_store_id !== undefined) updateData.to_store_id = to_store_id;
+    if (notes !== undefined) updateData.notes = notes;
+
+    await Transfer.update(id, updateData);
+
+    // Buscar transferência atualizada
+    const updatedTransfer = await Transfer.findById(id);
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Transferência atualizada com sucesso.',
+      data: updatedTransfer,
+    });
+  } catch (error) {
+    console.error('Erro ao atualizar transferência:', error);
+    res.status(500).json({ status: 'error', message: 'Erro interno ao atualizar transferência.' });
   }
 };
 

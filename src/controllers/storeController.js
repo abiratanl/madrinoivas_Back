@@ -4,11 +4,11 @@ exports.getAllStores = async (req, res) => {
   try {
     const showInactive = req.query.showInactive === 'true';
     const stores = await Store.findAll(showInactive);
-    
-    res.status(200).json({ 
-        status: 'success', 
-        results: stores.length, 
-        data: stores 
+
+    res.status(200).json({
+      status: 'success',
+      results: stores.length,
+      data: stores,
     });
   } catch (error) {
     console.error('Erro ao buscar lojas:', error);
@@ -22,21 +22,21 @@ exports.getStoreById = async (req, res) => {
     const store = await Store.findById(id);
 
     if (!store) {
-      return res.status(404).json({ 
-        status: 'error', 
-        message: 'Loja não encontrada.' 
+      return res.status(404).json({
+        status: 'error',
+        message: 'Loja não encontrada.',
       });
     }
 
-    res.status(200).json({ 
-      status: 'success', 
-      data: store 
+    res.status(200).json({
+      status: 'success',
+      data: store,
     });
   } catch (error) {
     console.error('Erro no Controller:', error);
-    res.status(500).json({ 
-      status: 'error', 
-      message: 'Erro interno ao buscar dados da loja.' 
+    res.status(500).json({
+      status: 'error',
+      message: 'Erro interno ao buscar dados da loja.',
     });
   }
 };
@@ -46,22 +46,22 @@ exports.createStore = async (req, res) => {
     const { name, phone, addresses } = req.body;
 
     if (!name || !name.trim()) {
-      return res.status(400).json({ 
-        status: 'fail', 
-        message: 'Nome da loja é obrigatório.' 
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Nome da loja é obrigatório.',
       });
     }
 
-    const store = await Store.create({ 
-      name: name.trim(), 
-      phone: phone?.trim() || null, 
-      addresses: addresses || [] 
+    const store = await Store.create({
+      name: name.trim(),
+      phone: phone?.trim() || null,
+      addresses: addresses || [],
     });
 
-    res.status(201).json({ 
-      status: 'success', 
+    res.status(201).json({
+      status: 'success',
       message: 'Loja criada com sucesso.',
-      data: store 
+      data: store,
     });
   } catch (error) {
     console.error('Erro ao criar loja:', error);
@@ -75,16 +75,16 @@ exports.updateStore = async (req, res) => {
     const { name, phone, addresses } = req.body;
 
     if (!name || !name.trim()) {
-      return res.status(400).json({ 
-        status: 'fail', 
-        message: 'Nome da loja é obrigatório.' 
+      return res.status(400).json({
+        status: 'fail',
+        message: 'Nome da loja é obrigatório.',
       });
     }
 
-    const updated = await Store.update(id, { 
-      name: name.trim(), 
-      phone: phone?.trim() || null, 
-      addresses: addresses || [] 
+    const updated = await Store.update(id, {
+      name: name.trim(),
+      phone: phone?.trim() || null,
+      addresses: addresses || [],
     });
 
     if (!updated) {
@@ -95,7 +95,9 @@ exports.updateStore = async (req, res) => {
     }
 
     const updatedStore = await Store.findById(id);
-    res.status(200).json({ status: 'success', message: 'Loja atualizada com sucesso', data: updatedStore });
+    res
+      .status(200)
+      .json({ status: 'success', message: 'Loja atualizada com sucesso', data: updatedStore });
   } catch (error) {
     console.error('Erro ao atualizar loja:', error);
     res.status(500).json({ status: 'error', message: 'Erro interno ao atualizar loja.' });
@@ -116,13 +118,41 @@ exports.toggleStoreActive = async (req, res) => {
     }
 
     const updatedStore = await Store.findById(id);
-    res.status(200).json({ 
-      status: 'success', 
+    res.status(200).json({
+      status: 'success',
       message: `Loja ${updatedStore.is_active ? 'ativada' : 'inativada'} com sucesso`,
-      data: updatedStore 
+      data: updatedStore,
     });
   } catch (error) {
     console.error('Erro ao alternar status da loja:', error);
     res.status(500).json({ status: 'error', message: 'Erro interno ao alterar status da loja.' });
   }
 };
+
+// NOVO: Listar lojas para transferência (acessível por atendentes)
+// Retorna todas as lojas ativas exceto a do usuário logado
+exports.getStoresForTransfer = async (req, res) => {
+  try {
+    const userStoreId = req.user.storeId;
+
+    if (!userStoreId) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Usuário não possui loja associada.',
+      });
+    }
+
+    const stores = await Store.findAllForTransfer(userStoreId);
+
+    res.status(200).json({
+      status: 'success',
+      results: stores.length,
+      data: stores,
+    });
+  } catch (error) {
+    console.error('Erro ao buscar lojas para transferência:', error);
+    res.status(500).json({ status: 'error', message: 'Erro interno ao listar lojas.' });
+  }
+};
+
+module.exports = exports;
