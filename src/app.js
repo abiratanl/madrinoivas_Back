@@ -27,6 +27,8 @@ const localhostRegex = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 
 const productionRegex = /^https?:\/\/(www\.)?madrinoivas\.com\.br$/;
 
+const ngrokRegex = /^https:\/\/[a-z0-9-]+\.ngrok-free\.dev$/;
+
 app.use(
   cors({
     origin(origin, callback) {
@@ -35,7 +37,7 @@ app.use(
         return callback(null, true);
       }
 
-      if (localhostRegex.test(origin) || productionRegex.test(origin)) {
+      if (localhostRegex.test(origin) || productionRegex.test(origin) || ngrokRegex.test(origin)) {
         return callback(null, true);
       }
 
