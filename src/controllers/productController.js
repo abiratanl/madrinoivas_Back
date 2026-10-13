@@ -163,7 +163,13 @@ exports.updateProduct = async (req, res) => {
     // 1. Atualiza dados de texto
     const updated = await Product.update(id, req.body);
 
-    // 2. Se houver NOVAS fotos, adiciona (não apaga as antigas aqui)
+    // 2. Gerencia imagens: deleta as que foram removidas, adiciona as novas
+    const keepIds = req.body.existing_photo_ids ? JSON.parse(req.body.existing_photo_ids) : [];
+    
+    // Deleta do R2 e BD as imagens que não estão na lista de manter
+    await Product.deleteImages(id, keepIds);
+
+    // Adiciona novas imagens (se houver)
     if (req.processedImages && req.processedImages.length > 0) {
         await Product.addImages(id, req.processedImages);
     }

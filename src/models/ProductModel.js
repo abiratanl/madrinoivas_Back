@@ -72,6 +72,54 @@ class ProductModel {
     return rows;
   }
 
+  // Deleta imagens do R2 e do BD
+  static async deleteImages(productId, imageIdsToKeep = []) {
+    // Busca imagens atuais
+    const currentImages = await this.getImagesByProductId(productId);
+    const idsToKeepSet = new Set(imageIdsToKeep);
+    
+    // Filtra imagens para deletar (não estão na lista de manter)
+    const toDelete = currentImages.filter(img => !idsToKeepSet.has(img.id));
+    
+    if (toDelete.length === 0) return;
+    
+    // Delete from R2
+    const { S3Client, DeleteObjectCommand } = require('@aws-sdk/client-s3');
+    const r2Client = new S3Client({
+        region: 'auto',
+        endpoint: process.env.AWS_ENDPOINT,
+        credentials: {
+            accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+        },
+    });
+    
+    const baseUrl = process.env.AWS_URL.replace(/\/$/, '');
+    const bucket = process.env.AWS_BUCKET;
+    
+    const extractKey = (url) => {
+        const prefix = `${baseUrl}/`;
+        return url.startsWith(prefix) ? url.slice(prefix.length) : null;
+    };
+    
+    for (const img of toDelete) {
+        const fullKey = extractKey(img.url_full);
+        const thumbKey = extractKey(img.url_thumb);
+        
+        if (fullKey) {
+            await r2Client.send(new DeleteObjectCommand({ Bucket: bucket, Key: fullKey }));
+        }
+        if (thumbKey) {
+            await r2Client.send(new DeleteObjectCommand({ Bucket: bucket, Key: thumbKey }));
+        }
+    }
+    
+    // Delete from DB
+    const deleteIds = toDelete.map(img => img.id);
+    const placeholders = deleteIds.map(() => '?').join(',');
+    await db.query(`DELETE FROM product_images WHERE id IN (${placeholders})`, deleteIds);
+  }
+
   // Insere múltiplas imagens de uma vez (Bulk Insert)
   static async addImages(productId, imagesArray) {
     if (!imagesArray || imagesArray.length === 0) return;
