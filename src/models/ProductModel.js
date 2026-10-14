@@ -39,15 +39,12 @@ class ProductModel {
 
     query += ` ORDER BY p.created_at DESC`;
 
-    // Debug: Mostra no terminal a query que está sendo feita
-    console.log('Query Produtos:', query, values);
-
     const [rows] = await db.execute(query, values);
     return rows;
   }
   static async findById(id) {
-    // Aqui trazemos apenas os dados crus do produto.
-    // As imagens são buscadas separadamente pelo controller usando getImagesByProductId
+    // Get raw product data only.
+    // Images are fetched separately by controller using getImagesByProductId
     const sql = `
       SELECT p.*, c.name as category_name, s.name as store_name 
       FROM products p
@@ -61,7 +58,7 @@ class ProductModel {
 
   // --- IMAGENS (NOVO) ---
 
-  // Busca todas as fotos de um produto específico
+  // Get all photos for a specific product
   static async getImagesByProductId(productId) {
     const sql = `
         SELECT * FROM product_images 
@@ -72,13 +69,13 @@ class ProductModel {
     return rows;
   }
 
-  // Deleta imagens do R2 e do BD
+  // Delete images from R2 and DB
   static async deleteImages(productId, imageIdsToKeep = []) {
-    // Busca imagens atuais
+    // Get current images
     const currentImages = await this.getImagesByProductId(productId);
     const idsToKeepSet = new Set(imageIdsToKeep);
     
-    // Filtra imagens para deletar (não estão na lista de manter)
+    // Filter images to delete (not in keep list)
     const toDelete = currentImages.filter(img => !idsToKeepSet.has(img.id));
     
     if (toDelete.length === 0) return;
@@ -118,9 +115,33 @@ class ProductModel {
     const deleteIds = toDelete.map(img => img.id);
     const placeholders = deleteIds.map(() => '?').join(',');
     await db.query(`DELETE FROM product_images WHERE id IN (${placeholders})`, deleteIds);
+
+    // If main image was deleted, promote first remaining image
+    const deletedMain = toDelete.some(img => img.is_main === 1);
+    if (deletedMain && imageIdsToKeep.length > 0) {
+      await db.query(
+        `UPDATE product_images SET is_main = 1 WHERE id = ?`,
+        [imageIdsToKeep[0]]
+      );
+    }
   }
 
-  // Insere múltiplas imagens de uma vez (Bulk Insert)
+  // Reset is_main flag for all images of a product
+  static async resetMainImage(productId) {
+    const sql = `UPDATE product_images SET is_main = 0 WHERE product_id = ?`;
+    await db.query(sql, [productId]);
+  }
+
+  // Set a specific image as the main image for a product
+  static async setMainImage(productId, imageId) {
+    // First reset all to 0
+    await this.resetMainImage(productId);
+    // Then set the specified image as main
+    const sql = `UPDATE product_images SET is_main = 1 WHERE id = ? AND product_id = ?`;
+    await db.query(sql, [imageId, productId]);
+  }
+
+  // Insert multiple images at once (Bulk Insert)
   static async addImages(productId, imagesArray) {
     if (!imagesArray || imagesArray.length === 0) return;
 
@@ -129,9 +150,9 @@ class ProductModel {
         VALUES ?
       `;
 
-    // Prepara o array de arrays para o mysql2 fazer o bulk insert
+    // Prepare array of arrays for mysql2 bulk insert
     const values = imagesArray.map((img) => [
-      img.id, // ID gerado no middleware (ou gere um novo aqui: uuidv4())
+      img.id, // ID generated in middleware (or generate new here: uuidv4())
       productId,
       img.url_thumb,
       img.url_full,
@@ -141,7 +162,7 @@ class ProductModel {
     await db.query(sql, [values]);
   }
 
-  // --- ESCRITA ---
+  // --- WRITE ---
 
   static async create(data) {
     const id = uuidv4();
@@ -184,7 +205,7 @@ class ProductModel {
       is_featured ? 1 : 0,
     ]);
 
-    // Retorna o ID para que o Controller possa vincular as imagens
+    // Return ID so Controller can link images
     return id;
   }
 
@@ -192,7 +213,7 @@ class ProductModel {
     const fields = [];
     const values = [];
 
-    // Lista atualizada de campos permitidos na tabela products
+    // Updated list of allowed fields in products table
     const allowedFields = [
       'category_id',
       'code',
@@ -227,8 +248,8 @@ class ProductModel {
   }
 
   static async delete(id) {
-    // Graças ao ON DELETE CASCADE no banco, ao deletar o produto,
-    // as imagens na tabela product_images somem sozinhas do SQL.
+    // Thanks to ON DELETE CASCADE in DB, deleting product
+    // also removes images from product_images table automatically.
     const sql = 'DELETE FROM products WHERE id = ?';
     const [result] = await db.query(sql, [id]);
     return result.affectedRows > 0;

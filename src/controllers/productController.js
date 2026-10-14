@@ -12,35 +12,34 @@ exports.getAllProducts = async (req, res) => {
     const isGlobal = req.query.global_search === 'true' || req.query.global_search === true;
 
     if (isGlobal) {
-        // Se for global, NÃO adicionamos store_id ao filtro.
-        // Isso fará o banco trazer produtos de todas as lojas.
-        // (Futuramente, adicione aqui: if (req.user.role !== 'admin') return erro...)
-        console.log(`[BUSCA GLOBAL] Usuário ${req.user.id} visualizando todas as lojas.`);
+        // If global, do NOT add store_id to filter.
+// This will fetch products from all stores.
+        // (Future: add check: if (req.user.role !== 'admin') return error...)
     } else {
-        // 2. Se NÃO for global, aplicamos as restrições padrão:
+        // 2. If NOT global, apply default restrictions:
         
-        // Se o usuário tem loja fixa (Gerente/Vendedor), ele só vê a loja dele.
+        // If user has fixed store (Manager/Seller), they only see their store.
         if (req.user.storeId) {
             filters.store_id = req.user.storeId;
         }
         
-        // Se for Admin (sem loja fixa) e quiser filtrar por uma específica via Dropdown
+        // If Admin (no fixed store) and wants to filter by specific store via Dropdown
         else if (req.query.store_id) {
             filters.store_id = req.query.store_id;
         }
     }
 
     // ============================================================
-    // OUTROS FILTROS
+    // OTHER FILTERS
     // ============================================================
     
     if (req.query.category_id) filters.category_id = req.query.category_id;
     if (req.query.status) filters.status = req.query.status;
     
-    // Filtro para Home Page (Destaques)
+    // Home Page filter (Featured)
     if (req.query.is_featured) filters.is_featured = (req.query.is_featured === 'true');
 
-    // Busca no Model (que já faz o JOIN com imagens e categorias)
+    // Search in Model (which already does JOIN with images and categories)
     const products = await Product.findAll(filters);
     
     res.status(200).json({ status: 'success', results: products.length, data: products });
@@ -54,23 +53,23 @@ exports.getProductById = async (req, res) => {
   try {
     const { id } = req.params;
     
-    // 1. Busca dados do produto
+    // 1. Get product data
     const product = await Product.findById(id);
 
     if (!product) {
       return res.status(404).json({ status: 'error', message: 'Produto não encontrado.' });
     }
 
-    // Segurança: Bloqueia acesso entre lojas (exceto se for busca global ou admin)
-    // Se o usuário tem loja fixa e o produto é de outra loja -> Bloqueia
+    // Security: Block cross-store access (except global search or admin)
+    // If user has fixed store and product belongs to another store -> Block
     if (req.user.storeId && product.store_id !== req.user.storeId) {
       return res.status(403).json({ status: 'error', message: 'Acesso negado a este produto.' });
     }
 
-    // 2. Busca as imagens da galeria
+    // 2. Get gallery images
     const images = await Product.getImagesByProductId(id);
 
-    // Retorna o produto com o array de imagens dentro
+    // Return product with images array
     res.status(200).json({ 
         status: 'success', 
         data: {
@@ -92,29 +91,29 @@ exports.createProduct = async (req, res) => {
       status, store_id, is_featured 
     } = req.body;
 
-    // Validações Básicas
+    // Basic Validations
     if (!name || !rental_price || !code) {
       return res.status(400).json({ status: 'error', message: 'Nome, Código e Preço são obrigatórios.' });
     }
 
-    // --- LÓGICA DE PERMISSÃO DE LOJA (MUDANÇA AQUI) ---
+    // --- STORE PERMISSION LOGIC (CHANGE HERE) ---
     let finalStoreId;
 
-    // Verifique como você salvou o role no token JWT (pode ser 'admin', 'owner', 'superadmin')
+    // Check how role is saved in JWT token (can be 'admin', 'owner', 'superadmin')
     const isAdmin = req.user.role === 'admin' || req.user.role === 'owner';
 
     if (isAdmin) {
-        // Se é Admin, ele TEM que mandar o store_id pelo dropdown
+        // If Admin, they MUST send store_id via dropdown
         if (!store_id) {
             return res.status(400).json({ status: 'error', message: 'Administradores devem selecionar a Loja.' });
         }
         finalStoreId = store_id;
     } else {
-        // Se é Funcionário, ignoramos o dropdown e forçamos a loja dele
+        // If Employee, ignore dropdown and force their store
         finalStoreId = req.user.storeId;
     }
 
-    // 1. Cria o Produto
+    // 1. Create Product
     const newProductId = await Product.create({
       store_id: finalStoreId,
       category_id,
@@ -130,7 +129,7 @@ exports.createProduct = async (req, res) => {
       is_featured: is_featured === 'true' || is_featured === true ? 1 : 0
     });
 
-    // 2. Salva as imagens (Se houver upload processado pelo middleware)
+    // 2. Save images (if any processed by middleware)
     if (req.processedImages && req.processedImages.length > 0) {
         await Product.addImages(newProductId, req.processedImages);
     }
@@ -151,27 +150,59 @@ exports.updateProduct = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Verificar existência
+    // Check existence
     const existingProduct = await Product.findById(id);
     if (!existingProduct) return res.status(404).json({ message: 'Produto não encontrado.' });
 
-    // Verificar permissão de loja
+    // Check store permission
     if (req.user.storeId && existingProduct.store_id !== req.user.storeId) {
       return res.status(403).json({ message: 'Você não tem permissão para editar este produto.' });
     }
 
-    // 1. Atualiza dados de texto
+    // 1. Update text data
     const updated = await Product.update(id, req.body);
 
-    // 2. Gerencia imagens: deleta as que foram removidas, adiciona as novas
+    // 2. Manage images: delete removed, add new
     const keepIds = req.body.existing_photo_ids ? JSON.parse(req.body.existing_photo_ids) : [];
     
-    // Deleta do R2 e BD as imagens que não estão na lista de manter
+    // Delete from R2 and DB images not in keep list
     await Product.deleteImages(id, keepIds);
 
-    // Adiciona novas imagens (se houver)
+    // Add new images (if any)
     if (req.processedImages && req.processedImages.length > 0) {
+        // If there are new images, reset is_main for all existing images
+        // to avoid duplicates in listing (multiple is_main = 1)
+        await Product.resetMainImage(id);
         await Product.addImages(id, req.processedImages);
+    }
+
+    // Always apply main image selection (main_photo_index)
+    // Index is global (existing + new images)
+    if ((keepIds.length > 0 || (req.processedImages && req.processedImages.length > 0)) && req.body.main_photo_index !== undefined) {
+        const mainIndex = parseInt(req.body.main_photo_index) || 0;
+        
+        let mainImageId = null;
+        
+        if (mainIndex < keepIds.length) {
+            // Main image is among kept existing images
+            mainImageId = keepIds[mainIndex];
+        } else if (req.processedImages && req.processedImages.length > 0) {
+            // Main image is among new images
+            const newImageIndex = mainIndex - keepIds.length;
+            if (newImageIndex >= 0 && newImageIndex < req.processedImages.length) {
+                mainImageId = req.processedImages[newImageIndex].id;
+            }
+        }
+        
+        if (mainImageId) {
+            await Product.setMainImage(id, mainImageId);
+        } else if (keepIds.length > 0) {
+            // Fallback: first kept image
+            await Product.setMainImage(id, keepIds[0]);
+        } else if (req.processedImages && req.processedImages.length > 0) {
+            // Fallback: first new image
+            await Product.setMainImage(id, req.processedImages[0].id);
+        }
     }
 
     res.status(200).json({ status: 'success', message: 'Produto atualizado com sucesso.' });
@@ -192,7 +223,7 @@ exports.deleteProduct = async (req, res) => {
       return res.status(403).json({ message: 'Você não tem permissão para excluir este produto.' });
     }
 
-    // O delete do produto dispara CASCADE na tabela de imagens
+    // Product delete triggers CASCADE on images table
     await Product.delete(id);
 
     res.status(200).json({ status: 'success', message: 'Produto removido com sucesso.' });
