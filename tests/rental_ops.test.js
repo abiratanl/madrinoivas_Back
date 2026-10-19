@@ -15,14 +15,16 @@ jest.mock('../src/middlewares/authMiddleware', () => ({
     req.user = { id: 'user-op', role: 'attendant', storeId: 'store-A' };
     next();
   },
-  restrictTo: (...roles) => (req, res, next) => next(),
+  restrictTo:
+    (..._roles) =>
+    (req, res, next) =>
+      next(),
 }));
 
 // =================================================================
 // 2. SUÍTE DE TESTES (OPERAÇÕES)
 // =================================================================
 describe('Rental Operations (Return & Cancel)', () => {
-
   afterEach(() => {
     jest.clearAllMocks();
   });
@@ -34,7 +36,7 @@ describe('Rental Operations (Return & Cancel)', () => {
     RentalModel.findById.mockResolvedValue({
       id: 'rental-active',
       store_id: 'store-A', // Mesma loja
-      status: 'picked_up'
+      status: 'picked_up',
     });
 
     // 2. Mock da Operação de Banco
@@ -44,14 +46,14 @@ describe('Rental Operations (Return & Cancel)', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body.message).toMatch(/devolução registrada/i);
-    expect(RentalModel.returnRental).toHaveBeenCalledWith('rental-active', 0);
+    expect(RentalModel.returnRental).toHaveBeenCalledWith('rental-active', 0, false);
   });
 
   it('POST /api/rentals/:id/return › Should FAIL if already returned', async () => {
     RentalModel.findById.mockResolvedValue({
       id: 'rental-closed',
       store_id: 'store-A',
-      status: 'returned' // Já devolvido
+      status: 'returned', // Já devolvido
     });
 
     const res = await request(app).post('/api/rentals/rental-closed/return');
@@ -65,7 +67,7 @@ describe('Rental Operations (Return & Cancel)', () => {
     RentalModel.findById.mockResolvedValue({
       id: 'rental-other',
       store_id: 'store-B', // Loja Diferente
-      status: 'picked_up'
+      status: 'picked_up',
     });
 
     const res = await request(app).post('/api/rentals/rental-other/return');
@@ -81,7 +83,7 @@ describe('Rental Operations (Return & Cancel)', () => {
     RentalModel.findById.mockResolvedValue({
       id: 'rental-res',
       store_id: 'store-A',
-      status: 'reserved'
+      status: 'reserved',
     });
 
     RentalModel.cancelRental.mockResolvedValue(true);
@@ -98,7 +100,7 @@ describe('Rental Operations (Return & Cancel)', () => {
     RentalModel.findById.mockResolvedValue({
       id: 'rental-out',
       store_id: 'store-A',
-      status: 'picked_up'
+      status: 'picked_up',
     });
 
     const res = await request(app).post('/api/rentals/rental-out/cancel');
@@ -107,5 +109,4 @@ describe('Rental Operations (Return & Cancel)', () => {
     expect(res.body.message).toMatch(/não é possível cancelar/i);
     expect(RentalModel.cancelRental).not.toHaveBeenCalled();
   });
-
 });

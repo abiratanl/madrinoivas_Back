@@ -7,7 +7,9 @@ const swaggerDocument = require('./docs/swagger');
 
 // --- ROUTE IMPORTS ---
 const authRoutes = require('./routes/authRoutes');
+const bannerRoutes = require('./routes/bannerRoutes');
 const categoryRoutes = require('./routes/categoryRoutes');
+const collectionRoutes = require('./routes/collectionRoutes');
 const customerRoutes = require('./routes/customerRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
 const productRoutes = require('./routes/productRoutes');
@@ -105,9 +107,20 @@ app.get('/', (req, res) => {
   });
 });
 
+// --- PUBLIC ROUTES (no auth required for home page) ---
+const publicBannerRoutes = require('./routes/publicBannerRoutes');
+const publicCollectionRoutes = require('./routes/publicCollectionRoutes');
+const publicProductRoutes = require('./routes/publicProductRoutes');
+
+app.use('/api/public/banners', publicBannerRoutes);
+app.use('/api/public/collections', publicCollectionRoutes);
+app.use('/api/public/products', publicProductRoutes);
+
 // --- API DOMAIN ROUTES ---
 app.use('/api/users', userRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/banners', bannerRoutes);
+app.use('/api/collections', collectionRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/payments', paymentRoutes);

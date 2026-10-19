@@ -14,27 +14,29 @@ jest.mock('../src/middlewares/authMiddleware', () => ({
     req.user = { id: 'user-1', role: 'attendant', storeId: 'store-A' };
     next();
   },
-  restrictTo: (...roles) => (req, res, next) => next(),
+  restrictTo:
+    (..._roles) =>
+    (req, res, next) =>
+      next(),
 }));
 
 // 3. Mock do Upload de Imagens (NOVO e IMPORTANTE)
 // Isso impede que o teste tente usar o S3/R2 ou Sharp de verdade
-jest.mock('../src/middlewares/imageUploadMiddleware', () => ({
+jest.mock('../src/middlewares/imageMiddleware', () => ({
   // Simula o Multer (passa direto)
-  uploadArray: (req, res, next) => next(), 
-  
+  uploadArray: (req, res, next) => next(),
+
   // Simula o processamento do Sharp/R2
   optimizeAndUploadImages: (req, res, next) => {
     // Injetamos imagens falsas como se o upload tivesse funcionado
     req.processedImages = [
-      { id: 'img-1', url_thumb: 'thumb.webp', url_full: 'full.webp', is_main: true }
+      { id: 'img-1', url_thumb: 'thumb.webp', url_full: 'full.webp', is_main: true },
     ];
     next();
-  }
+  },
 }));
 
 describe('Product API (CRUD & Global Search)', () => {
-  
   // Limpa os mocks antes de cada teste para não haver contagem de chamadas errada
   beforeEach(() => {
     jest.clearAllMocks();
@@ -45,9 +47,9 @@ describe('Product API (CRUD & Global Search)', () => {
     const newProductPayload = {
       name: 'Vestido Gala Vermelho',
       code: 'VEST-RED-01',
-      rental_price: 250.00,
+      rental_price: 250.0,
       store_id: 'store-A',
-      is_featured: true
+      is_featured: true,
     };
 
     // Configura o retorno do Mock do Model
@@ -59,17 +61,19 @@ describe('Product API (CRUD & Global Search)', () => {
     // Verificações
     expect(res.statusCode).toBe(201);
     expect(res.body.productId).toBe('new-product-uuid-123');
-    
+
     // Verifica se o Model.create foi chamado corretamente com is_featured convertido
-    expect(ProductModel.create).toHaveBeenCalledWith(expect.objectContaining({
-      name: 'Vestido Gala Vermelho',
-      is_featured: 1 // O controller converte true -> 1
-    }));
+    expect(ProductModel.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'Vestido Gala Vermelho',
+        is_featured: 1, // O controller converte true -> 1
+      }),
+    );
 
     // Verifica se o Model.addImages foi chamado (pois nosso mock de middleware injetou imagens)
     expect(ProductModel.addImages).toHaveBeenCalledWith(
-      'new-product-uuid-123', 
-      expect.any(Array) // Espera um array de imagens
+      'new-product-uuid-123',
+      expect.any(Array), // Espera um array de imagens
     );
   });
 
@@ -97,7 +101,7 @@ describe('Product API (CRUD & Global Search)', () => {
     await request(app).get('/api/products');
 
     expect(ProductModel.findAll).toHaveBeenCalledWith(
-      expect.objectContaining({ store_id: 'store-A' })
+      expect.objectContaining({ store_id: 'store-A' }),
     );
   });
 
@@ -109,8 +113,8 @@ describe('Product API (CRUD & Global Search)', () => {
 
     // Recupera os argumentos passados para a função findAll
     const calls = ProductModel.findAll.mock.calls[0][0];
-    
+
     // Garante que store_id NÃO foi passado nos filtros
-    expect(calls.store_id).toBeUndefined(); 
+    expect(calls.store_id).toBeUndefined();
   });
 });

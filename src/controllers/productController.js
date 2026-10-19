@@ -34,6 +34,7 @@ exports.getAllProducts = async (req, res) => {
     // ============================================================
     
     if (req.query.category_id) filters.category_id = req.query.category_id;
+    if (req.query.collection_id) filters.collection_id = req.query.collection_id;
     if (req.query.status) filters.status = req.query.status;
     
     // Home Page filter (Featured)
@@ -86,7 +87,7 @@ exports.getProductById = async (req, res) => {
 exports.createProduct = async (req, res) => {
   try {
     const { 
-      category_id, code, name, description, 
+      category_id, collection_id, code, name, description, 
       size, color, brand, purchase_price, rental_price, 
       status, store_id, is_featured 
     } = req.body;
@@ -117,6 +118,7 @@ exports.createProduct = async (req, res) => {
     const newProductId = await Product.create({
       store_id: finalStoreId,
       category_id,
+      collection_id,
       code,
       name,
       description,
