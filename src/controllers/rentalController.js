@@ -104,9 +104,27 @@ exports.updateRental = async (req, res) => {
     if (!rental) return res.status(404).json({ message: 'Aluguel não encontrado' });
     if (req.user.storeId && rental.store_id !== req.user.storeId) return res.status(403).json({ message: 'Acesso negado.' });
 
-    // Só pode editar se ainda não foi retirado
-    if (['picked_up', 'returned', 'cancelled'].includes(rental.status)) {
-      return res.status(400).json({ message: 'Não é possível editar um aluguel em andamento ou finalizado.' });
+    // Finalizados/cancelados nunca podem ser editados
+    if (['returned', 'cancelled'].includes(rental.status)) {
+      return res
+        .status(400)
+        .json({ message: 'Não é possível editar um aluguel finalizado ou cancelado.' });
+    }
+
+    // Retirados/atrasados: apenas campos financeiros (multa, desconto, observações).
+    // Itens, datas e status ficam travados para não afetar o estoque.
+    if (['picked_up', 'late'].includes(rental.status)) {
+      const hasLockedChanges =
+        req.body.products ||
+        req.body.start_date ||
+        req.body.end_date_scheduled ||
+        (req.body.status && req.body.status !== rental.status);
+      if (hasLockedChanges) {
+        return res.status(400).json({
+          message:
+            'Em um aluguel retirado ou atrasado só é possível alterar multa, desconto e observações.',
+        });
+      }
     }
 
     let itemsToSave = null;

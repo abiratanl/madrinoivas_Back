@@ -142,6 +142,55 @@ describe('Financial & Payments API', () => {
     expect(PaymentModel.create).not.toHaveBeenCalled();
   });
 
+  it('POST /api/payments › Should ALLOW paying the penalty fee on a fully paid rental', async () => {
+    // Aluguel de 200 quitado, com multa de 30 já embutida no total (230)
+    RentalModel.findById.mockResolvedValue({
+      id: 'rental-123',
+      store_id: 'store-A',
+      total_amount: 230.0,
+      penalty_fee: 30.0,
+    });
+    PaymentModel.getTotalPaidByRentalId.mockResolvedValue(200);
+    PaymentModel.create.mockResolvedValue({
+      id: 'pay-penalty',
+      rental_id: 'rental-123',
+      amount: 30.0,
+      payment_method: 'pix',
+      type: 'spontaneous',
+    });
+
+    const res = await request(app).post('/api/payments').send({
+      rental_id: 'rental-123',
+      amount: 30.0,
+      payment_method: 'pix',
+    });
+
+    expect(res.statusCode).toBe(201);
+    expect(PaymentModel.create).toHaveBeenCalledWith(
+      expect.objectContaining({ rental_id: 'rental-123', amount: 30.0 }),
+    );
+  });
+
+  it('POST /api/payments › Should FAIL if amount exceeds balance plus the penalty fee', async () => {
+    RentalModel.findById.mockResolvedValue({
+      id: 'rental-123',
+      store_id: 'store-A',
+      total_amount: 230.0,
+      penalty_fee: 30.0,
+    });
+    PaymentModel.getTotalPaidByRentalId.mockResolvedValue(200);
+
+    const res = await request(app).post('/api/payments').send({
+      rental_id: 'rental-123',
+      amount: 31.0,
+      payment_method: 'pix',
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.message).toMatch(/saldo devedor/i);
+    expect(PaymentModel.create).not.toHaveBeenCalled();
+  });
+
   it('POST /api/payments › Should FAIL if amount is zero or negative', async () => {
     const res = await request(app).post('/api/payments').send({
       rental_id: 'rental-123',

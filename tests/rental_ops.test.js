@@ -109,4 +109,84 @@ describe('Rental Operations (Return & Cancel)', () => {
     expect(res.body.message).toMatch(/não é possível cancelar/i);
     expect(RentalModel.cancelRental).not.toHaveBeenCalled();
   });
+
+  // --- UPDATE (EDIÇÃO) ---
+
+  it('PUT /api/rentals/:id › Should ALLOW editing penalty_fee on a picked_up rental', async () => {
+    RentalModel.findById.mockResolvedValue({
+      id: 'rental-out',
+      store_id: 'store-A',
+      status: 'picked_up',
+    });
+    RentalModel.updateRental.mockResolvedValue(true);
+
+    const res = await request(app)
+      .put('/api/rentals/rental-out')
+      .send({ penalty_fee: 50, discount: 0, notes: 'Multa por atraso' });
+
+    expect(res.statusCode).toBe(200);
+    expect(RentalModel.updateRental).toHaveBeenCalledWith(
+      'rental-out',
+      expect.objectContaining({ penalty_fee: 50, notes: 'Multa por atraso' }),
+    );
+  });
+
+  it('PUT /api/rentals/:id › Should ALLOW editing penalty_fee on a late rental', async () => {
+    RentalModel.findById.mockResolvedValue({
+      id: 'rental-late',
+      store_id: 'store-A',
+      status: 'late',
+    });
+    RentalModel.updateRental.mockResolvedValue(true);
+
+    const res = await request(app).put('/api/rentals/rental-late').send({ penalty_fee: 80 });
+
+    expect(res.statusCode).toBe(200);
+    expect(RentalModel.updateRental).toHaveBeenCalled();
+  });
+
+  it('PUT /api/rentals/:id › Should FAIL when changing locked fields on a picked_up rental', async () => {
+    RentalModel.findById.mockResolvedValue({
+      id: 'rental-out',
+      store_id: 'store-A',
+      status: 'picked_up',
+    });
+
+    const res = await request(app)
+      .put('/api/rentals/rental-out')
+      .send({ penalty_fee: 50, products: [{ id: 'prod-1', quantity: 1 }] });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.message).toMatch(/retirado ou atrasado/i);
+    expect(RentalModel.updateRental).not.toHaveBeenCalled();
+  });
+
+  it('PUT /api/rentals/:id › Should FAIL when changing status on a late rental', async () => {
+    RentalModel.findById.mockResolvedValue({
+      id: 'rental-late',
+      store_id: 'store-A',
+      status: 'late',
+    });
+
+    const res = await request(app)
+      .put('/api/rentals/rental-late')
+      .send({ penalty_fee: 50, status: 'returned' });
+
+    expect(res.statusCode).toBe(400);
+    expect(RentalModel.updateRental).not.toHaveBeenCalled();
+  });
+
+  it('PUT /api/rentals/:id › Should FAIL to edit a returned rental', async () => {
+    RentalModel.findById.mockResolvedValue({
+      id: 'rental-closed',
+      store_id: 'store-A',
+      status: 'returned',
+    });
+
+    const res = await request(app).put('/api/rentals/rental-closed').send({ penalty_fee: 50 });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.message).toMatch(/finalizado ou cancelado/i);
+    expect(RentalModel.updateRental).not.toHaveBeenCalled();
+  });
 });

@@ -215,7 +215,9 @@ class RentalModel {
       await conn.beginTransaction();
       const { discount, notes, end_date_scheduled, items, status, penalty_fee, start_date } = data;
 
-      // 1. Valida se aluguel pode ser editado (não picked_up/returned/cancelled)
+      // 1. Valida se aluguel pode ser editado. Finalizados/cancelados: nunca.
+      // Retirados/atrasados: apenas campos financeiros (multa, desconto, notas) —
+      // itens, datas e status ficam travados para não afetar o estoque.
       const [rentalRows] = await conn.query(
         `SELECT id, status, start_date, end_date_scheduled, total_amount, discount, penalty_fee 
          FROM rentals WHERE id = ? FOR UPDATE`,
@@ -223,8 +225,20 @@ class RentalModel {
       );
       if (rentalRows.length === 0) throw new Error('Aluguel não encontrado');
       const rental = rentalRows[0];
-      if (['picked_up', 'returned', 'cancelled'].includes(rental.status)) {
-        throw new Error('Não é possível editar um aluguel em andamento ou finalizado');
+      if (['returned', 'cancelled'].includes(rental.status)) {
+        throw new Error('Não é possível editar um aluguel finalizado ou cancelado');
+      }
+      const isOngoing = ['picked_up', 'late'].includes(rental.status);
+      if (
+        isOngoing &&
+        ((items && items.length > 0) ||
+          start_date ||
+          end_date_scheduled ||
+          (status && status !== rental.status))
+      ) {
+        throw new Error(
+          'Em um aluguel retirado ou atrasado só é possível alterar multa, desconto e observações'
+        );
       }
 
       const newStatus = status || rental.status;
@@ -335,16 +349,43 @@ class RentalModel {
         [discount || 0, notes || null, end_date_scheduled, finalAmount, penalty_fee || 0, status || rental.status, id]
       );
 
-      // 5. Recalcula parcelas pendentes se total mudou
+      // 5. Recalcula as parcelas pendentes regulares se o total mudou.
+      // Parcelas de multa (type='penalty') ficam de fora do rateio: o valor
+      // distribuído é o total sem a multa, e a parcela de multa é sincronizada
+      // diretamente com o penalty_fee (sem criar duplicatas).
       const [pendingInst] = await conn.query(
-        `SELECT id, value FROM installments WHERE rental_id = ? AND status = 'pending' ORDER BY number ASC`,
+        `SELECT id, value FROM installments WHERE rental_id = ? AND status = 'pending' AND type = 'installment' ORDER BY number ASC`,
         [id]
       );
       if (pendingInst.length > 0) {
-        const newInstallmentValue = finalAmount / pendingInst.length;
+        const regularTotal = finalAmount - (penalty_fee || 0);
+        const newInstallmentValue = regularTotal / pendingInst.length;
         for (const inst of pendingInst) {
           await conn.query(`UPDATE installments SET value = ? WHERE id = ?`, [newInstallmentValue, inst.id]);
         }
+      }
+
+      const [existingPenalty] = await conn.query(
+        `SELECT id FROM installments WHERE rental_id = ? AND type = 'penalty' AND status != 'cancelled'`,
+        [id]
+      );
+      if ((penalty_fee || 0) > 0) {
+        if (existingPenalty.length > 0) {
+          await conn.query(`UPDATE installments SET value = ? WHERE id = ?`, [
+            penalty_fee,
+            existingPenalty[0].id,
+          ]);
+        } else {
+          await conn.query(
+            `INSERT INTO installments (id, rental_id, number, total_installments, value, due_date, status, type)
+             VALUES (?, ?, 999, 999, ?, NOW(), 'pending', 'penalty')`,
+            [uuidv4(), id, penalty_fee]
+          );
+        }
+      } else if (existingPenalty.length > 0) {
+        await conn.query(`UPDATE installments SET status = 'cancelled' WHERE id = ?`, [
+          existingPenalty[0].id,
+        ]);
       }
 
       await conn.commit();
@@ -393,7 +434,7 @@ class RentalModel {
 
       // 4. Recalcula parcelas pendentes (rateia valor extra nas parcelas a vencer)
       const [pendingInst] = await conn.query(
-        `SELECT id, value FROM installments WHERE rental_id = ? AND status = 'pending' ORDER BY number ASC`,
+        `SELECT id, value FROM installments WHERE rental_id = ? AND status = 'pending' AND type = 'installment' ORDER BY number ASC`,
         [id]
       );
       if (pendingInst.length > 0 && extraAmount > 0) {
@@ -427,7 +468,7 @@ class RentalModel {
 
       // 1. Trava aluguel e valida estado (protege contra double-return)
       const [rentalRows] = await conn.query(
-        `SELECT id, status, start_date, end_date_scheduled, total_amount, penalty_fee 
+        `SELECT id, status, start_date, end_date_scheduled, total_amount, discount, penalty_fee 
          FROM rentals WHERE id = ? AND status NOT IN ('returned', 'cancelled') FOR UPDATE`,
         [id]
       );
@@ -457,20 +498,46 @@ class RentalModel {
         await conn.query("UPDATE products SET status = ? WHERE id = ?", [targetStatus, item.product_id]);
       }
 
-      // 4. Finaliza aluguel com data real e multa calculada
+      // 4. Finaliza aluguel com data real e multa calculada.
+      // O total_amount segue a convenção do sistema: itens - desconto + multa,
+      // então a multa passa a fazer parte do saldo devedor.
+      const [sumResult] = await conn.query(
+        'SELECT COALESCE(SUM(unit_price * quantity), 0) AS total FROM rental_items WHERE rental_id = ?',
+        [id]
+      );
+      const finalTotal =
+        parseFloat(sumResult[0].total) - parseFloat(rental.discount || 0) + finalPenaltyFee;
       await conn.query(
-        `UPDATE rentals SET status = 'returned', end_date_real = NOW(), penalty_fee = ? WHERE id = ?`,
-        [finalPenaltyFee, id]
+        `UPDATE rentals SET status = 'returned', end_date_real = NOW(), penalty_fee = ?, total_amount = ? WHERE id = ?`,
+        [finalPenaltyFee, finalTotal, id]
       );
 
-      // 5. Se houver multa, cria parcela extra de "penalty" (opcional, mas recomendado)
+      // 5. Se houver multa, cria (ou atualiza) a parcela extra de "penalty".
+      // A checagem torna a devolução idempotente: uma segunda devolução não
+      // pode criar parcelas de multa duplicadas.
+      const [existingPenalty] = await conn.query(
+        `SELECT id FROM installments WHERE rental_id = ? AND type = 'penalty' AND status != 'cancelled'`,
+        [id]
+      );
       if (finalPenaltyFee > 0) {
-        const instId = uuidv4();
-        await conn.query(
-          `INSERT INTO installments (id, rental_id, number, total_installments, value, due_date, status, type)
-           VALUES (?, ?, 999, 999, ?, NOW(), 'pending', 'penalty')`,
-          [instId, id, finalPenaltyFee]
-        );
+        if (existingPenalty.length > 0) {
+          await conn.query(`UPDATE installments SET value = ? WHERE id = ?`, [
+            finalPenaltyFee,
+            existingPenalty[0].id,
+          ]);
+        } else {
+          const instId = uuidv4();
+          await conn.query(
+            `INSERT INTO installments (id, rental_id, number, total_installments, value, due_date, status, type)
+             VALUES (?, ?, 999, 999, ?, NOW(), 'pending', 'penalty')`,
+            [instId, id, finalPenaltyFee]
+          );
+        }
+      } else if (existingPenalty.length > 0) {
+        // Penalty removed on a re-return: cancel the leftover penalty installment
+        await conn.query(`UPDATE installments SET status = 'cancelled' WHERE id = ?`, [
+          existingPenalty[0].id,
+        ]);
       }
 
       await conn.commit();

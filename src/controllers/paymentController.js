@@ -36,7 +36,8 @@ exports.createPayment = async (req, res) => {
       return res.status(403).json({ message: 'Não é possível receber pagamentos de outra loja.' });
     }
 
-    // Business rule: amount cannot exceed the rental's remaining balance
+    // Business rule: amount cannot exceed the rental's remaining balance.
+    // total_amount already includes the penalty fee (items - discount + penalty).
     const totalPaid = await Payment.getTotalPaidByRentalId(rental_id);
     const remainingBalance = parseFloat(rental.total_amount) - totalPaid;
     if (numericAmount > remainingBalance + 0.01) {
@@ -122,8 +123,9 @@ exports.updatePayment = async (req, res) => {
       return res.status(400).json({ message: 'Tipo de pagamento inválido.' });
     }
 
-    // Business rule: new amount cannot exceed the rental's remaining balance,
-    // excluding the payment being edited from the total already paid
+    // Business rule: new amount cannot exceed the rental's remaining balance
+    // (total_amount already includes the penalty fee), excluding the payment
+    // being edited from the total already paid
     if (numericAmount !== undefined) {
       const totalPaid = await Payment.getTotalPaidByRentalId(payment.rental_id);
       const remainingBalance =

@@ -506,7 +506,7 @@ example: {
         },
         responses: {
           200: { description: 'Aluguel atualizado com sucesso' },
-          400: { description: 'Não é possível editar um aluguel em andamento ou finalizado' },
+          400: { description: 'Aluguel finalizado/cancelado, ou tentativa de alterar itens/datas/status de um aluguel retirado ou atrasado (apenas multa, desconto e observações são permitidos)' },
           403: { description: 'Acesso negado - aluguel de outra loja' },
           404: { description: 'Aluguel não encontrado' },
         },
