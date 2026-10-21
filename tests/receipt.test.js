@@ -54,7 +54,34 @@ describe('Payment Receipts API', () => {
     expect(res.body.message).toMatch(/recibo emitido/i);
     expect(res.body.data.receiptId).toBe('receipt-1');
     expect(res.body.data.whatsappDeliveryStatus).toBe('sent');
-    expect(receiptService.issueReceipt).toHaveBeenCalledWith('pay-1', 'user-caixa');
+    expect(receiptService.issueReceipt).toHaveBeenCalledWith('pay-1', 'user-caixa', {
+      sendWhatsApp: true,
+    });
+  });
+
+  it('POST /api/payments/:id/receipt › Should return the PDF when sendWhatsApp is false', async () => {
+    PaymentModel.findById.mockResolvedValue({
+      id: 'pay-1',
+      rental_id: 'rental-123',
+      amount: 100,
+      status: 'confirmed',
+    });
+    receiptService.issueReceipt.mockResolvedValue({
+      receiptId: 'receipt-1',
+      deliveryStatus: 'pending',
+      pdfBuffer: Buffer.from('%PDF-fake'),
+    });
+
+    const res = await request(app)
+      .post('/api/payments/pay-1/receipt')
+      .send({ sendWhatsApp: false });
+
+    expect(res.statusCode).toBe(201);
+    expect(res.headers['content-type']).toMatch(/application\/pdf/);
+    expect(res.headers['x-receipt-id']).toBe('receipt-1');
+    expect(receiptService.issueReceipt).toHaveBeenCalledWith('pay-1', 'user-caixa', {
+      sendWhatsApp: false,
+    });
   });
 
   it('POST /api/payments/:id/receipt › Should FAIL if payment does not exist', async () => {

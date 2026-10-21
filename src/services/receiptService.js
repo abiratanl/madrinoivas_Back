@@ -125,10 +125,12 @@ async function safeUnlink(filePath) {
 /**
  * Issues a signed receipt PDF for a confirmed payment, registers it in the
  * receipts table and tries to deliver it to the customer via WhatsApp.
+ * When sendWhatsApp is false, the delivery is skipped and the signed PDF
+ * buffer is returned so the caller can offer it for printing.
  *
- * @returns {{ receiptId: string, deliveryStatus: 'sent' | 'failed' }}
+ * @returns {{ receiptId: string, deliveryStatus: 'sent' | 'failed' | 'pending', pdfBuffer?: Buffer }}
  */
-exports.issueReceipt = async (paymentId, userId) => {
+exports.issueReceipt = async (paymentId, userId, { sendWhatsApp = true } = {}) => {
   const payment = await PaymentModel.findById(paymentId);
   if (!payment) {
     throw new Error('PAYMENT_NOT_FOUND');
@@ -173,24 +175,31 @@ exports.issueReceipt = async (paymentId, userId) => {
   });
 
   let deliveryStatus = 'failed';
+  let pdfBuffer;
   try {
-    // Prefer whatsapp/mobile contacts, primary first
-    const phoneContact = (customer?.contacts || [])
-      .filter((c) => ['whatsapp', 'mobile'].includes(c.type))
-      .sort((a, b) => (b.is_primary || 0) - (a.is_primary || 0))[0];
-
-    if (!phoneContact) {
-      console.error('Receipt %s: customer has no WhatsApp/mobile contact.', receipt.id);
+    if (!sendWhatsApp) {
+      // Print flow: no WhatsApp delivery; the receipt keeps the default
+      // 'pending' status and the signed PDF goes back to the caller
+      pdfBuffer = await fs.promises.readFile(signedPath);
     } else {
-      const sent = await whatsappService.sendDocument({
-        to: phoneContact.value,
-        filePath: signedPath,
-        fileName: `recibo_${paymentId}.pdf`,
-        caption: `Recibo de pagamento - ${formatCurrency(payment.amount)} - ${store?.name || 'Madri Noivas'}`,
-      });
-      deliveryStatus = sent ? 'sent' : 'failed';
+      // Prefer whatsapp/mobile contacts, primary first
+      const phoneContact = (customer?.contacts || [])
+        .filter((c) => ['whatsapp', 'mobile'].includes(c.type))
+        .sort((a, b) => (b.is_primary || 0) - (a.is_primary || 0))[0];
+
+      if (!phoneContact) {
+        console.error('Receipt %s: customer has no WhatsApp/mobile contact.', receipt.id);
+      } else {
+        const sent = await whatsappService.sendDocument({
+          to: phoneContact.value,
+          filePath: signedPath,
+          fileName: `recibo_${paymentId}.pdf`,
+          caption: `Recibo de pagamento - ${formatCurrency(payment.amount)} - ${store?.name || 'Madri Noivas'}`,
+        });
+        deliveryStatus = sent ? 'sent' : 'failed';
+      }
+      await ReceiptModel.updateDeliveryStatus(receipt.id, deliveryStatus);
     }
-    await ReceiptModel.updateDeliveryStatus(receipt.id, deliveryStatus);
   } catch (error) {
     console.error('Error delivering receipt %s via WhatsApp:', receipt.id, error);
     await ReceiptModel.updateDeliveryStatus(receipt.id, 'failed');
@@ -199,5 +208,9 @@ exports.issueReceipt = async (paymentId, userId) => {
     await safeUnlink(signedPath);
   }
 
-  return { receiptId: receipt.id, deliveryStatus };
+  return {
+    receiptId: receipt.id,
+    deliveryStatus: sendWhatsApp ? deliveryStatus : 'pending',
+    pdfBuffer,
+  };
 };

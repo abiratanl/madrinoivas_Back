@@ -779,17 +779,33 @@ const swaggerDocument = {
     // ==========================================
     '/api/payments/{id}/receipt': {
       post: {
-        summary: 'Emitir recibo de pagamento (PDF assinado enviado via WhatsApp)',
+        summary: 'Emitir recibo de pagamento (PDF assinado enviado via WhatsApp ou para impressão)',
         description:
-          'Gera o PDF do recibo de um pagamento confirmado, assina com o assinador configurado (PDF_SIGNER), registra na tabela receipts e tenta entregar ao cliente via WhatsApp.',
+          'Gera o PDF do recibo de um pagamento confirmado, assina com o assinador configurado (PDF_SIGNER), registra na tabela receipts e tenta entregar ao cliente via WhatsApp. Com sendWhatsApp=false a entrega é ignorada e o PDF assinado é retornado (application/pdf) para impressão.',
         tags: ['Payments'],
         parameters: [
           { in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } },
         ],
+        requestBody: {
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  sendWhatsApp: {
+                    type: 'boolean',
+                    default: true,
+                    description: 'false para pular o envio via WhatsApp e receber o PDF para impressão',
+                  },
+                },
+              },
+            },
+          },
+        },
         responses: {
           201: {
             description:
-              'Recibo emitido com sucesso. Retorna receiptId e whatsappDeliveryStatus (sent|failed).',
+              'Recibo emitido com sucesso. Com WhatsApp: retorna receiptId e whatsappDeliveryStatus (sent|failed). Sem WhatsApp: retorna o PDF assinado (application/pdf) com o header X-Receipt-Id.',
           },
           404: { description: 'Pagamento não encontrado.' },
           422: { description: 'Pagamento cancelado — não é possível emitir recibo.' },

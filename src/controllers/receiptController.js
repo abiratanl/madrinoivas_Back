@@ -4,11 +4,14 @@ const receiptService = require('../services/receiptService');
 
 /**
  * POST /api/payments/:id/receipt
- * Issues a signed receipt PDF for a confirmed payment and delivers it via WhatsApp.
+ * Issues a signed receipt PDF for a confirmed payment. By default it is
+ * delivered via WhatsApp; with { sendWhatsApp: false } the WhatsApp step is
+ * skipped and the signed PDF is returned for printing.
  */
 exports.issueReceipt = async (req, res) => {
   try {
     const { id } = req.params;
+    const sendWhatsApp = req.body?.sendWhatsApp !== false;
 
     const payment = await PaymentModel.findById(id);
     if (!payment) {
@@ -21,7 +24,20 @@ exports.issueReceipt = async (req, res) => {
         .json({ message: 'Não é possível emitir recibo de um pagamento cancelado.' });
     }
 
-    const { receiptId, deliveryStatus } = await receiptService.issueReceipt(id, req.user.id);
+    const { receiptId, deliveryStatus, pdfBuffer } = await receiptService.issueReceipt(
+      id,
+      req.user.id,
+      { sendWhatsApp },
+    );
+
+    if (!sendWhatsApp) {
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `inline; filename="recibo_${receiptId}.pdf"`,
+        'X-Receipt-Id': receiptId,
+      });
+      return res.status(201).send(pdfBuffer);
+    }
 
     res.status(201).json({
       status: 'success',
