@@ -302,3 +302,25 @@ INSERT INTO `stores` (`id`, `name`, `address`, `phone`) VALUES
 
 -- Loja 2: Cruzeiro
 ('92a6c8b3-764d-4a1e-8260-559648661522', 'Madri Noivas - Cruzeiro', 'Rua Dr. Othon Barcellos, 280 - Centro, Cruzeiro - SP, 12701-080', '(12) 3143-6987');
+-- =================================================================================
+-- 15. RECEIPTS
+-- Payment receipts (issued, signed PDF documents) with WhatsApp delivery status.
+-- =================================================================================
+CREATE TABLE IF NOT EXISTS `receipts` (
+  `id` char(36) NOT NULL,
+  `payment_id` char(36) NOT NULL,
+  `customer_id` char(36) NOT NULL,
+  `amount` decimal(10,2) NOT NULL,
+  `payment_method` varchar(20) NOT NULL,
+  `issued_at` datetime NOT NULL,
+  `created_by` char(36) DEFAULT NULL,
+  `whatsapp_delivery_status` enum('pending','sent','failed') NOT NULL DEFAULT 'pending',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `fk_receipts_payment` (`payment_id`),
+  KEY `fk_receipts_customer` (`customer_id`),
+  KEY `fk_receipts_created_by` (`created_by`),
+  CONSTRAINT `fk_receipts_payment` FOREIGN KEY (`payment_id`) REFERENCES `payments` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_receipts_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`),
+  CONSTRAINT `fk_receipts_created_by` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
