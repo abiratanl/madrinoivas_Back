@@ -1,6 +1,19 @@
 const db = require('../config/database');
 const { v4: uuidv4 } = require('uuid');
 
+// MySQL DATETIME rejects ISO 8601 strings with milliseconds/Z suffix
+// ('2026-10-24T14:30:00.000Z'). Formatting through a Date in the server's local
+// timezone stores the wall-clock time the attendant picked, regardless of
+// whether the client sends a naive 'YYYY-MM-DDTHH:mm' or a full ISO string.
+const toMySqlDateTime = (value) => {
+  const d = new Date(value);
+  const pad = (n) => String(n).padStart(2, '0');
+  return (
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+    `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+  );
+};
+
 class RentalModel {
   /**
    * Busca aluguel com todos os detalhes (Itens, Cliente, Parcelas e Pagamentos)
@@ -8,7 +21,8 @@ class RentalModel {
   static async findById(id) {
     // 1. Dados do Aluguel + Cliente + Loja
     const sqlRental = `
-      SELECT r.*, c.name as customer_name, c.cpf as customer_cpf, s.name as store_name
+      SELECT r.*, c.name as customer_name, c.cpf as customer_cpf, s.name as store_name,
+             DATE_FORMAT(r.fitting_date, '%Y-%m-%dT%H:%i') AS fitting_date
       FROM rentals r
       JOIN customers c ON r.customer_id = c.id
       JOIN stores s ON r.store_id = s.id
@@ -45,17 +59,26 @@ class RentalModel {
 
       const rentalId = uuidv4();
       const {
-        store_id, customer_id, user_id,
-        start_date, end_date_scheduled, delivery_address_id, delivery_type,
+        store_id,
+        customer_id,
+        user_id,
+        start_date,
+        fitting_date,
+        end_date_scheduled,
+        delivery_address_id,
+        delivery_type,
         laundry_days_needed,
         items, // Array de { product_id, price }
         installments_config, // { count: 3, first_due_date: '...' }
-        notes, discount, status, penalty_fee // 'budget' ou 'reserved'
+        notes,
+        discount,
+        status,
+        penalty_fee, // 'budget' ou 'reserved'
       } = data;
 
       // 1. Calcular Totais
       let totalAmount = 0;
-      items.forEach(item => totalAmount += (parseFloat(item.unit_price) * (item.quantity || 1)));
+      items.forEach((item) => (totalAmount += parseFloat(item.unit_price) * (item.quantity || 1)));
 
       const finalAmount = totalAmount - (discount || 0) + (penalty_fee || 0);
 
@@ -63,13 +86,26 @@ class RentalModel {
       const sqlRental = `
         INSERT INTO rentals (
           id, store_id, customer_id, user_id, delivery_address_id, delivery_type,
-          laundry_days_needed, start_date, end_date_scheduled, status, total_amount, discount, notes, penalty_fee
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          laundry_days_needed, start_date, fitting_date, end_date_scheduled, status, total_amount, discount, notes, penalty_fee
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
 
       await conn.query(sqlRental, [
-        rentalId, store_id, customer_id, user_id, delivery_address_id || null, delivery_type || 'pickup_store',
-        laundry_days_needed || 2, start_date, end_date_scheduled, status || 'reserved', finalAmount, discount || 0, notes, penalty_fee || 0
+        rentalId,
+        store_id,
+        customer_id,
+        user_id,
+        delivery_address_id || null,
+        delivery_type || 'pickup_store',
+        laundry_days_needed || 2,
+        start_date,
+        fitting_date ? toMySqlDateTime(fitting_date) : null,
+        end_date_scheduled,
+        status || 'reserved',
+        finalAmount,
+        discount || 0,
+        notes,
+        penalty_fee || 0,
       ]);
 
       // 3. Inserir Itens e Atualizar Estoque
@@ -89,32 +125,37 @@ class RentalModel {
                  OR (r.start_date < ? AND r.end_date_scheduled > ?)
                )
              LIMIT 1`,
-            [item.product_id, end_date_scheduled, start_date]
+            [item.product_id, end_date_scheduled, start_date],
           );
-          
+
           if (overlap.length > 0) {
-            const [productInfo] = await conn.query('SELECT name, code FROM products WHERE id = ?', [item.product_id]);
+            const [productInfo] = await conn.query('SELECT name, code FROM products WHERE id = ?', [
+              item.product_id,
+            ]);
             const existing = overlap[0];
-            const conflictType = existing.status === 'late' 
-              ? 'atrasado (devolução pendente)' 
-              : `reservado/retirado (${existing.start_date} a ${existing.end_date_scheduled})`;
-            throw new Error(`Produto "${productInfo[0]?.name || item.product_id}" já está ${conflictType}.`);
+            const conflictType =
+              existing.status === 'late'
+                ? 'atrasado (devolução pendente)'
+                : `reservado/retirado (${existing.start_date} a ${existing.end_date_scheduled})`;
+            throw new Error(
+              `Produto "${productInfo[0]?.name || item.product_id}" já está ${conflictType}.`,
+            );
           }
         }
 
         // A. Insere na tabela de ligação
         await conn.query(
           `INSERT INTO rental_items (id, rental_id, product_id, unit_price, quantity) VALUES (?, ?, ?, ?, ?)`,
-          [itemId, rentalId, item.product_id, item.unit_price, item.quantity || 1]
+          [itemId, rentalId, item.product_id, item.unit_price, item.quantity || 1],
         );
 
         // B. Atualiza status do produto (Se não for apenas um orçamento)
         if (status !== 'budget') {
           const newProductStatus = status === 'picked_up' ? 'rented' : 'reserved';
-          await conn.query(
-            `UPDATE products SET status = ? WHERE id = ?`,
-            [newProductStatus, item.product_id]
-          );
+          await conn.query(`UPDATE products SET status = ? WHERE id = ?`, [
+            newProductStatus,
+            item.product_id,
+          ]);
         }
       }
 
@@ -134,7 +175,7 @@ class RentalModel {
           await conn.query(
             `INSERT INTO installments (id, rental_id, number, total_installments, value, due_date, status)
              VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
-            [instId, rentalId, i, count, installmentValue, dueDate]
+            [instId, rentalId, i, count, installmentValue, dueDate],
           );
         }
       }
@@ -142,7 +183,6 @@ class RentalModel {
       await conn.commit();
       conn.release();
       return { id: rentalId, total_amount: finalAmount, status: status || 'reserved' };
-
     } catch (error) {
       await conn.rollback();
       conn.release();
@@ -154,6 +194,7 @@ class RentalModel {
   static async findAll(filters = {}) {
     let sql = `
       SELECT r.id, r.status, r.start_date, r.end_date_scheduled, r.total_amount, r.penalty_fee,
+             DATE_FORMAT(r.fitting_date, '%Y-%m-%dT%H:%i') AS fitting_date,
              c.name as customer_name, s.name as store_name
       FROM rentals r
       JOIN customers c ON r.customer_id = c.id
@@ -177,14 +218,17 @@ class RentalModel {
   }
 
   /**
-    * CONFIRMA RETIRADA (O cliente levou o traje)
-    */
+   * CONFIRMA RETIRADA (O cliente levou o traje)
+   */
   static async pickUp(id) {
     const conn = await db.getConnection();
     try {
       await conn.beginTransaction();
       // 1. Atualiza status do aluguel
-      const [result] = await conn.query("UPDATE rentals SET status = 'picked_up' WHERE id = ? AND status IN ('reserved', 'budget')", [id]);
+      const [result] = await conn.query(
+        "UPDATE rentals SET status = 'picked_up' WHERE id = ? AND status IN ('reserved', 'budget')",
+        [id],
+      );
       if (result.affectedRows === 0) {
         throw new Error('Aluguel não encontrado ou status não permite retirada');
       }
@@ -193,7 +237,7 @@ class RentalModel {
       // Remove a restrição de status anterior para garantir que todos os itens do aluguel sejam atualizados
       await conn.query(
         "UPDATE products p JOIN rental_items ri ON p.id = ri.product_id SET p.status = 'rented' WHERE ri.rental_id = ?",
-        [id]
+        [id],
       );
 
       await conn.commit();
@@ -214,6 +258,8 @@ class RentalModel {
     try {
       await conn.beginTransaction();
       const { discount, notes, end_date_scheduled, items, status, penalty_fee, start_date } = data;
+      // fitting_date uses `'fitting_date' in data` so that undefined = keep current
+      // value and null = clear the column.
 
       // 1. Valida se aluguel pode ser editado. Finalizados/cancelados: nunca.
       // Retirados/atrasados: apenas campos financeiros (multa, desconto, notas) —
@@ -221,7 +267,7 @@ class RentalModel {
       const [rentalRows] = await conn.query(
         `SELECT id, status, start_date, end_date_scheduled, total_amount, discount, penalty_fee 
          FROM rentals WHERE id = ? FOR UPDATE`,
-        [id]
+        [id],
       );
       if (rentalRows.length === 0) throw new Error('Aluguel não encontrado');
       const rental = rentalRows[0];
@@ -237,7 +283,7 @@ class RentalModel {
           (status && status !== rental.status))
       ) {
         throw new Error(
-          'Em um aluguel retirado ou atrasado só é possível alterar multa, desconto e observações'
+          'Em um aluguel retirado ou atrasado só é possível alterar multa, desconto e observações',
         );
       }
 
@@ -250,18 +296,18 @@ class RentalModel {
         // 2a. Libera os produtos antigos (volta para 'available')
         const [oldItems] = await conn.query(
           `SELECT product_id FROM rental_items WHERE rental_id = ?`,
-          [id]
+          [id],
         );
         for (const oldItem of oldItems) {
           await conn.query(
             `UPDATE products SET status = 'available' WHERE id = ? AND status IN ('reserved', 'rented')`,
-            [oldItem.product_id]
+            [oldItem.product_id],
           );
         }
 
         // 2b. Remove os itens antigos
-        await conn.query("DELETE FROM rental_items WHERE rental_id = ?", [id]);
-        
+        await conn.query('DELETE FROM rental_items WHERE rental_id = ?', [id]);
+
         // 2c. Valida e insere os novos itens com atualização de status
         for (const item of items) {
           // Validar sobreposição de datas (exceto budget)
@@ -278,22 +324,28 @@ class RentalModel {
                    OR (r.start_date < ? AND r.end_date_scheduled > ?)
                  )
                LIMIT 1`,
-              [item.product_id, id, checkEndDate, checkStartDate]
+              [item.product_id, id, checkEndDate, checkStartDate],
             );
-            
+
             if (overlap.length > 0) {
-              const [productInfo] = await conn.query('SELECT name, code FROM products WHERE id = ?', [item.product_id]);
+              const [productInfo] = await conn.query(
+                'SELECT name, code FROM products WHERE id = ?',
+                [item.product_id],
+              );
               const existing = overlap[0];
-              const conflictType = existing.status === 'late' 
-                ? 'atrasado (devolução pendente)' 
-                : `reservado/retirado (${existing.start_date} a ${existing.end_date_scheduled})`;
-              throw new Error(`Produto "${productInfo[0]?.name || item.product_id}" já está ${conflictType}.`);
+              const conflictType =
+                existing.status === 'late'
+                  ? 'atrasado (devolução pendente)'
+                  : `reservado/retirado (${existing.start_date} a ${existing.end_date_scheduled})`;
+              throw new Error(
+                `Produto "${productInfo[0]?.name || item.product_id}" já está ${conflictType}.`,
+              );
             }
           }
-          
+
           await conn.query(
             `INSERT INTO rental_items (id, rental_id, product_id, unit_price, quantity) VALUES (?, ?, ?, ?, ?)`,
-            [uuidv4(), id, item.product_id, item.unit_price, item.quantity || 1]
+            [uuidv4(), id, item.product_id, item.unit_price, item.quantity || 1],
           );
 
           // 2d. Atualiza status do produto conforme status do aluguel
@@ -301,7 +353,7 @@ class RentalModel {
             const productStatus = newStatus === 'picked_up' ? 'rented' : 'reserved';
             await conn.query(
               `UPDATE products SET status = ? WHERE id = ? AND status = 'available'`,
-              [productStatus, item.product_id]
+              [productStatus, item.product_id],
             );
           }
         }
@@ -311,7 +363,7 @@ class RentalModel {
       if (rental.status !== newStatus && (rental.status === 'budget' || newStatus === 'budget')) {
         const [currentItems] = await conn.query(
           `SELECT product_id FROM rental_items WHERE rental_id = ?`,
-          [id]
+          [id],
         );
         if (currentItems.length > 0) {
           if (newStatus === 'budget') {
@@ -319,7 +371,7 @@ class RentalModel {
             for (const item of currentItems) {
               await conn.query(
                 `UPDATE products SET status = 'available' WHERE id = ? AND status IN ('reserved', 'rented')`,
-                [item.product_id]
+                [item.product_id],
               );
             }
           } else {
@@ -328,7 +380,7 @@ class RentalModel {
             for (const item of currentItems) {
               await conn.query(
                 `UPDATE products SET status = ? WHERE id = ? AND status = 'available'`,
-                [productStatus, item.product_id]
+                [productStatus, item.product_id],
               );
             }
           }
@@ -337,17 +389,29 @@ class RentalModel {
 
       // 4. Recalcula total baseado nos itens ATUAIS do banco (segurança contra manipulação)
       const [sumResult] = await conn.query(
-        "SELECT COALESCE(SUM(unit_price * quantity), 0) as total FROM rental_items WHERE rental_id = ?",
-        [id]
+        'SELECT COALESCE(SUM(unit_price * quantity), 0) as total FROM rental_items WHERE rental_id = ?',
+        [id],
       );
       const totalAmount = parseFloat(sumResult[0].total);
       const finalAmount = totalAmount - (discount || 0) + (penalty_fee || 0);
 
       // 4. Atualiza aluguel
-      await conn.query(
-        `UPDATE rentals SET discount = ?, notes = ?, end_date_scheduled = COALESCE(?, end_date_scheduled), total_amount = ?, penalty_fee = ?, status = ? WHERE id = ?`,
-        [discount || 0, notes || null, end_date_scheduled, finalAmount, penalty_fee || 0, status || rental.status, id]
-      );
+      let updateSql = `UPDATE rentals SET discount = ?, notes = ?, end_date_scheduled = COALESCE(?, end_date_scheduled), total_amount = ?, penalty_fee = ?, status = ?`;
+      const updateParams = [
+        discount || 0,
+        notes || null,
+        end_date_scheduled,
+        finalAmount,
+        penalty_fee || 0,
+        status || rental.status,
+      ];
+      if ('fitting_date' in data) {
+        updateSql += ', fitting_date = ?';
+        updateParams.push(data.fitting_date ? toMySqlDateTime(data.fitting_date) : null);
+      }
+      updateSql += ' WHERE id = ?';
+      updateParams.push(id);
+      await conn.query(updateSql, updateParams);
 
       // 5. Recalcula as parcelas pendentes regulares se o total mudou.
       // Parcelas de multa (type='penalty') ficam de fora do rateio: o valor
@@ -355,19 +419,22 @@ class RentalModel {
       // diretamente com o penalty_fee (sem criar duplicatas).
       const [pendingInst] = await conn.query(
         `SELECT id, value FROM installments WHERE rental_id = ? AND status = 'pending' AND type = 'installment' ORDER BY number ASC`,
-        [id]
+        [id],
       );
       if (pendingInst.length > 0) {
         const regularTotal = finalAmount - (penalty_fee || 0);
         const newInstallmentValue = regularTotal / pendingInst.length;
         for (const inst of pendingInst) {
-          await conn.query(`UPDATE installments SET value = ? WHERE id = ?`, [newInstallmentValue, inst.id]);
+          await conn.query(`UPDATE installments SET value = ? WHERE id = ?`, [
+            newInstallmentValue,
+            inst.id,
+          ]);
         }
       }
 
       const [existingPenalty] = await conn.query(
         `SELECT id FROM installments WHERE rental_id = ? AND type = 'penalty' AND status != 'cancelled'`,
-        [id]
+        [id],
       );
       if ((penalty_fee || 0) > 0) {
         if (existingPenalty.length > 0) {
@@ -379,7 +446,7 @@ class RentalModel {
           await conn.query(
             `INSERT INTO installments (id, rental_id, number, total_installments, value, due_date, status, type)
              VALUES (?, ?, 999, 999, ?, NOW(), 'pending', 'penalty')`,
-            [uuidv4(), id, penalty_fee]
+            [uuidv4(), id, penalty_fee],
           );
         }
       } else if (existingPenalty.length > 0) {
@@ -409,7 +476,7 @@ class RentalModel {
       // 1. Trava o aluguel e valida estado (não pode estender returned/cancelled/budget/reserved)
       const [rentalRows] = await conn.query(
         `SELECT id, status, start_date, end_date_scheduled, total_amount FROM rentals WHERE id = ? FOR UPDATE`,
-        [id]
+        [id],
       );
       if (rentalRows.length === 0) throw new Error('Aluguel não encontrado');
       const rental = rentalRows[0];
@@ -429,22 +496,19 @@ class RentalModel {
       // 3. Atualiza aluguel (data + valor total)
       await conn.query(
         `UPDATE rentals SET end_date_scheduled = ?, total_amount = total_amount + ? WHERE id = ?`,
-        [newEndDate, extraAmount, id]
+        [newEndDate, extraAmount, id],
       );
 
       // 4. Recalcula parcelas pendentes (rateia valor extra nas parcelas a vencer)
       const [pendingInst] = await conn.query(
         `SELECT id, value FROM installments WHERE rental_id = ? AND status = 'pending' AND type = 'installment' ORDER BY number ASC`,
-        [id]
+        [id],
       );
       if (pendingInst.length > 0 && extraAmount > 0) {
         const extraPerInstallment = extraAmount / pendingInst.length;
         for (const inst of pendingInst) {
           const newValue = parseFloat(inst.value) + extraPerInstallment;
-          await conn.query(
-            `UPDATE installments SET value = ? WHERE id = ?`,
-            [newValue, inst.id]
-          );
+          await conn.query(`UPDATE installments SET value = ? WHERE id = ?`, [newValue, inst.id]);
         }
       }
 
@@ -470,7 +534,7 @@ class RentalModel {
       const [rentalRows] = await conn.query(
         `SELECT id, status, start_date, end_date_scheduled, total_amount, discount, penalty_fee 
          FROM rentals WHERE id = ? AND status NOT IN ('returned', 'cancelled') FOR UPDATE`,
-        [id]
+        [id],
       );
       if (rentalRows.length === 0) {
         throw new Error('Aluguel não encontrado ou já finalizado/cancelado');
@@ -484,18 +548,26 @@ class RentalModel {
         const now = new Date();
         if (now > scheduledEnd) {
           const daysLate = Math.ceil((now - scheduledEnd) / (1000 * 60 * 60 * 24));
-          const rentalDays = Math.max(1, Math.ceil((scheduledEnd - new Date(rental.start_date)) / (1000 * 60 * 60 * 24)));
+          const rentalDays = Math.max(
+            1,
+            Math.ceil((scheduledEnd - new Date(rental.start_date)) / (1000 * 60 * 60 * 24)),
+          );
           const dailyRate = rental.total_amount / rentalDays;
           // Regra de negócio: 10% da diária por dia de atraso (ajuste conforme sua regra)
-          finalPenaltyFee = daysLate * dailyRate * 0.10;
+          finalPenaltyFee = daysLate * dailyRate * 0.1;
         }
       }
 
       // 3. Atualiza status dos produtos conforme opção
-      const [items] = await conn.query('SELECT product_id FROM rental_items WHERE rental_id = ?', [id]);
+      const [items] = await conn.query('SELECT product_id FROM rental_items WHERE rental_id = ?', [
+        id,
+      ]);
       const targetStatus = makeAvailable ? 'available' : 'maintenance';
       for (const item of items) {
-        await conn.query("UPDATE products SET status = ? WHERE id = ?", [targetStatus, item.product_id]);
+        await conn.query('UPDATE products SET status = ? WHERE id = ?', [
+          targetStatus,
+          item.product_id,
+        ]);
       }
 
       // 4. Finaliza aluguel com data real e multa calculada.
@@ -503,13 +575,13 @@ class RentalModel {
       // então a multa passa a fazer parte do saldo devedor.
       const [sumResult] = await conn.query(
         'SELECT COALESCE(SUM(unit_price * quantity), 0) AS total FROM rental_items WHERE rental_id = ?',
-        [id]
+        [id],
       );
       const finalTotal =
         parseFloat(sumResult[0].total) - parseFloat(rental.discount || 0) + finalPenaltyFee;
       await conn.query(
         `UPDATE rentals SET status = 'returned', end_date_real = NOW(), penalty_fee = ?, total_amount = ? WHERE id = ?`,
-        [finalPenaltyFee, finalTotal, id]
+        [finalPenaltyFee, finalTotal, id],
       );
 
       // 5. Se houver multa, cria (ou atualiza) a parcela extra de "penalty".
@@ -517,7 +589,7 @@ class RentalModel {
       // pode criar parcelas de multa duplicadas.
       const [existingPenalty] = await conn.query(
         `SELECT id FROM installments WHERE rental_id = ? AND type = 'penalty' AND status != 'cancelled'`,
-        [id]
+        [id],
       );
       if (finalPenaltyFee > 0) {
         if (existingPenalty.length > 0) {
@@ -530,7 +602,7 @@ class RentalModel {
           await conn.query(
             `INSERT INTO installments (id, rental_id, number, total_installments, value, due_date, status, type)
              VALUES (?, ?, 999, 999, ?, NOW(), 'pending', 'penalty')`,
-            [instId, id, finalPenaltyFee]
+            [instId, id, finalPenaltyFee],
           );
         }
       } else if (existingPenalty.length > 0) {
@@ -559,28 +631,25 @@ class RentalModel {
       await conn.beginTransaction();
 
       // 1. Busca itens
-      const [items] = await conn.query('SELECT product_id FROM rental_items WHERE rental_id = ?', [id]);
+      const [items] = await conn.query('SELECT product_id FROM rental_items WHERE rental_id = ?', [
+        id,
+      ]);
 
       // 2. Libera produtos (voltam a ficar available)
       for (const item of items) {
-        await conn.query(
-          "UPDATE products SET status = 'available' WHERE id = ?",
-          [item.product_id]
-        );
+        await conn.query("UPDATE products SET status = 'available' WHERE id = ?", [
+          item.product_id,
+        ]);
       }
 
       // 3. Atualiza status do aluguel
       // Nota: As parcelas financeiras podem ser canceladas aqui também se desejar,
       // mas vamos manter simples por enquanto.
-      await conn.query(
-        "UPDATE rentals SET status = 'cancelled' WHERE id = ?",
-        [id]
-      );
+      await conn.query("UPDATE rentals SET status = 'cancelled' WHERE id = ?", [id]);
 
       await conn.commit();
       conn.release();
       return true;
-
     } catch (error) {
       await conn.rollback();
       conn.release();
@@ -599,7 +668,7 @@ class RentalModel {
       // 1. Verifica se existe e status
       const [rentalRows] = await conn.query(
         `SELECT id, status FROM rentals WHERE id = ? FOR UPDATE`,
-        [id]
+        [id],
       );
       if (rentalRows.length === 0) {
         throw new Error('Aluguel não encontrado');
@@ -621,7 +690,6 @@ class RentalModel {
       await conn.commit();
       conn.release();
       return true;
-
     } catch (error) {
       await conn.rollback();
       conn.release();

@@ -428,6 +428,13 @@ const swaggerDocument = {
                     format: 'date-time',
                     description: 'Data/hora de retirada programada',
                   },
+                  fitting_date: {
+                    type: 'string',
+                    format: 'date-time',
+                    nullable: true,
+                    description:
+                      'Data/hora da prova do traje (opcional). Deve ser anterior ou igual à data de retirada.',
+                  },
                   end_date_scheduled: {
                     type: 'string',
                     format: 'date-time',
@@ -502,6 +509,7 @@ const swaggerDocument = {
                   { id: '6d0e63b3-155c-4893-b36d-d0bdb99a7a7b', quantity: 1 },
                 ],
                 start_date: '2026-08-15 10:00:00',
+                fitting_date: '2026-08-10 14:00:00',
                 end_date_scheduled: '2026-08-20 18:00:00',
                 status: 'reserved',
                 discount: 100.0,
@@ -585,6 +593,13 @@ const swaggerDocument = {
                     type: 'string',
                     format: 'date-time',
                     description: 'Nova data de retirada programada',
+                  },
+                  fitting_date: {
+                    type: 'string',
+                    format: 'date-time',
+                    nullable: true,
+                    description:
+                      'Nova data/hora da prova do traje. Envie null para limpar; omita para manter a atual.',
                   },
                   delivery_type: {
                     type: 'string',
@@ -795,7 +810,8 @@ const swaggerDocument = {
                   sendWhatsApp: {
                     type: 'boolean',
                     default: true,
-                    description: 'false para pular o envio via WhatsApp e receber o PDF para impressão',
+                    description:
+                      'false para pular o envio via WhatsApp e receber o PDF para impressão',
                   },
                 },
               },

@@ -212,6 +212,7 @@ CREATE TABLE IF NOT EXISTS `rentals` (
   `store_id` char(36) NOT NULL,
   `user_id` char(36) DEFAULT NULL,
   `start_date` datetime NOT NULL,
+  `fitting_date` datetime DEFAULT NULL,
   `end_date_scheduled` datetime NOT NULL,
   `end_date_actual` datetime DEFAULT NULL,
   `total_amount` decimal(10,2) NOT NULL,
