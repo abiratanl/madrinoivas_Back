@@ -1,5 +1,96 @@
 const Store = require('../models/StoreModel');
 
+// Must match the `type` ENUM of the contacts table
+const ALLOWED_CONTACT_TYPES = ['mobile', 'whatsapp', 'landline', 'email', 'instagram', 'facebook'];
+const CNPJ_REGEX = /^\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}$/;
+const CPF_REGEX = /^\d{3}\.?\d{3}\.?\d{3}-?\d{2}$/;
+
+const normalizeOptionalString = (value) => {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  const trimmed = String(value).trim();
+  return trimmed === '' ? null : trimmed;
+};
+
+const validateStorePayload = (body, { partial = false } = {}) => {
+  const errors = [];
+
+  if (!partial || body.name !== undefined) {
+    if (!body.name || !String(body.name).trim()) {
+      errors.push('Nome da loja é obrigatório.');
+    }
+  }
+
+  if (body.cnpj !== undefined && body.cnpj !== null && body.cnpj !== '') {
+    if (!CNPJ_REGEX.test(String(body.cnpj).trim())) {
+      errors.push('CNPJ inválido. Use o formato 00.000.000/0000-00.');
+    }
+  }
+
+  if (body.owner_cpf !== undefined && body.owner_cpf !== null && body.owner_cpf !== '') {
+    if (!CPF_REGEX.test(String(body.owner_cpf).trim())) {
+      errors.push('CPF do responsável inválido. Use o formato 000.000.000-00.');
+    }
+  }
+
+  if (body.contacts !== undefined) {
+    if (!Array.isArray(body.contacts)) {
+      errors.push('Contatos devem ser enviados como uma lista.');
+    } else {
+      for (const contact of body.contacts) {
+        if (!contact || !ALLOWED_CONTACT_TYPES.includes(contact.type)) {
+          errors.push(`Tipo de contato inválido. Use: ${ALLOWED_CONTACT_TYPES.join(', ')}.`);
+          break;
+        }
+        if (!contact.value || !String(contact.value).trim()) {
+          errors.push('Todo contato deve ter um valor preenchido.');
+          break;
+        }
+      }
+    }
+  }
+
+  if (body.addresses !== undefined && !Array.isArray(body.addresses)) {
+    errors.push('Endereços devem ser enviados como uma lista.');
+  }
+
+  return errors;
+};
+
+const buildStoreData = (body) => {
+  const data = {};
+
+  if (body.name !== undefined) data.name = String(body.name).trim();
+
+  const cnpj = normalizeOptionalString(body.cnpj);
+  if (cnpj !== undefined) data.cnpj = cnpj;
+
+  const ownerName = normalizeOptionalString(body.owner_name);
+  if (ownerName !== undefined) data.owner_name = ownerName;
+
+  const ownerCpf = normalizeOptionalString(body.owner_cpf);
+  if (ownerCpf !== undefined) data.owner_cpf = ownerCpf;
+
+  // Owner signature is a data URL; keep it as-is (no trimming)
+  if (body.owner_signature !== undefined) data.owner_signature = body.owner_signature || null;
+
+  if (body.is_active !== undefined) data.is_active = body.is_active ? 1 : 0;
+
+  if (Array.isArray(body.contacts)) {
+    data.contacts = body.contacts.map((contact) => ({
+      type: contact.type,
+      value: String(contact.value).trim(),
+      is_primary: contact.is_primary ? 1 : 0,
+    }));
+  }
+
+  if (Array.isArray(body.addresses)) {
+    data.addresses = body.addresses;
+  }
+
+  return data;
+};
+
 exports.getAllStores = async (req, res) => {
   try {
     const showInactive = req.query.showInactive === 'true';
@@ -43,20 +134,15 @@ exports.getStoreById = async (req, res) => {
 
 exports.createStore = async (req, res) => {
   try {
-    const { name, phone, addresses } = req.body;
-
-    if (!name || !name.trim()) {
+    const errors = validateStorePayload(req.body);
+    if (errors.length > 0) {
       return res.status(400).json({
         status: 'fail',
-        message: 'Nome da loja é obrigatório.',
+        message: errors.join(' '),
       });
     }
 
-    const store = await Store.create({
-      name: name.trim(),
-      phone: phone?.trim() || null,
-      addresses: addresses || [],
-    });
+    const store = await Store.create(buildStoreData(req.body));
 
     res.status(201).json({
       status: 'success',
@@ -72,25 +158,21 @@ exports.createStore = async (req, res) => {
 exports.updateStore = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, phone, addresses } = req.body;
 
-    if (!name || !name.trim()) {
+    const errors = validateStorePayload(req.body, { partial: true });
+    if (errors.length > 0) {
       return res.status(400).json({
         status: 'fail',
-        message: 'Nome da loja é obrigatório.',
+        message: errors.join(' '),
       });
     }
 
-    const updated = await Store.update(id, {
-      name: name.trim(),
-      phone: phone?.trim() || null,
-      addresses: addresses || [],
-    });
+    const updated = await Store.update(id, buildStoreData(req.body));
 
     if (!updated) {
       return res.status(404).json({
         status: 'fail',
-        message: 'Loja não encontrada ou nenhuma alteração realizada.',
+        message: 'Loja não encontrada.',
       });
     }
 
@@ -129,8 +211,8 @@ exports.toggleStoreActive = async (req, res) => {
   }
 };
 
-// NOVO: Listar lojas para transferência (acessível por atendentes)
-// Retorna todas as lojas ativas exceto a do usuário logado
+// List stores available as transfer destinations (accessible by attendants).
+// Returns all active stores except the one of the logged-in user.
 exports.getStoresForTransfer = async (req, res) => {
   try {
     const userStoreId = req.user.storeId;

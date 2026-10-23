@@ -32,7 +32,11 @@ async function seed() {
     ];
 
     for (const s of stores) {
-      await conn.query('INSERT INTO stores (id, name, phone) VALUES (?, ?, ?)', [s.id, s.name, '11999999999']);
+      await conn.query('INSERT INTO stores (id, name) VALUES (?, ?)', [s.id, s.name]);
+      await conn.query(
+        'INSERT INTO contacts (id, store_id, type, value, is_primary) VALUES (?, ?, ?, ?, 1)',
+        [uuidv4(), s.id, 'whatsapp', '11999999999']
+      );
     }
 
     // 3. Criar 3 USUÁRIOS (Senha padrão: 123456)

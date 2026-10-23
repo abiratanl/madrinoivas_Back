@@ -22,6 +22,14 @@ const formatCurrency = (value) =>
 
 const formatDate = (value) => (value ? new Date(value).toLocaleDateString('pt-BR') : '-');
 
+// Pick the store's main phone-like contact (primary first)
+const getStorePhone = (store) => {
+  const contact = (store?.contacts || [])
+    .filter((c) => ['whatsapp', 'mobile', 'landline'].includes(c.type))
+    .sort((a, b) => (b.is_primary || 0) - (a.is_primary || 0))[0];
+  return contact?.value || null;
+};
+
 const formatDateLong = (value) =>
   value
     ? new Date(value).toLocaleDateString('pt-BR', {
@@ -76,7 +84,8 @@ function generateContractPdf(outputPath, data) {
     });
     doc.fontSize(9);
     if (store?.address) doc.text(store.address, { align: 'center' });
-    if (store?.phone) doc.text(`Telefone: ${store.phone}`, { align: 'center' });
+    const storePhone = getStorePhone(store);
+    if (storePhone) doc.text(`Telefone: ${storePhone}`, { align: 'center' });
     doc.moveDown(0.5);
     doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
     doc.moveDown(1);

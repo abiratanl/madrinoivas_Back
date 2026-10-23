@@ -105,7 +105,7 @@ class AddressModel {
     return true;
   }
 
-  static async formatAddress(addr) {
+  static formatAddress(addr) {
     if (!addr) return null;
     return `${addr.street || ''}, ${addr.number || ''}${addr.complement ? ' ' + addr.complement : ''}${addr.neighborhood ? ' - ' + addr.neighborhood : ''}, ${addr.city || ''} - ${addr.state || ''}${addr.zip_code ? ' ' + addr.zip_code : ''}`.replace(/^, |, $/g, '');
   }

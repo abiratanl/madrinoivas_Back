@@ -20,6 +20,89 @@ const swaggerDocument = {
         bearerFormat: 'JWT',
       },
     },
+    schemas: {
+      StoreContactInput: {
+        type: 'object',
+        required: ['type', 'value'],
+        properties: {
+          type: {
+            type: 'string',
+            enum: ['mobile', 'whatsapp', 'landline', 'email', 'instagram', 'facebook'],
+            example: 'whatsapp',
+          },
+          value: { type: 'string', example: '(12) 99999-9999' },
+          is_primary: { type: 'boolean', example: true },
+        },
+      },
+      StoreAddressInput: {
+        type: 'object',
+        properties: {
+          type: {
+            type: 'string',
+            enum: ['residential', 'commercial', 'delivery', 'event_venue'],
+            example: 'commercial',
+          },
+          label: { type: 'string', example: 'Principal' },
+          zip_code: { type: 'string', example: '12505-010' },
+          street: { type: 'string', example: 'R. Dr. Castro Santos' },
+          number: { type: 'string', example: '98' },
+          complement: { type: 'string', example: 'Sala 2' },
+          neighborhood: { type: 'string', example: 'Centro' },
+          city: { type: 'string', example: 'Guaratinguetá' },
+          state: { type: 'string', example: 'SP' },
+          is_default: { type: 'boolean', example: true },
+        },
+      },
+      StoreInput: {
+        type: 'object',
+        required: ['name'],
+        properties: {
+          name: { type: 'string', example: 'Madri Noivas - Guaratinguetá' },
+          cnpj: { type: 'string', example: '12.345.678/0001-90' },
+          owner_name: { type: 'string', example: 'João da Silva' },
+          owner_cpf: { type: 'string', example: '123.456.789-00' },
+          owner_signature: {
+            type: 'string',
+            description: 'Assinatura digitalizada do responsável como data URL (PNG/JPEG)',
+          },
+          contacts: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/StoreContactInput' },
+          },
+          addresses: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/StoreAddressInput' },
+          },
+        },
+      },
+      Store: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          name: { type: 'string' },
+          cnpj: { type: 'string', nullable: true },
+          owner_name: { type: 'string', nullable: true },
+          owner_cpf: { type: 'string', nullable: true },
+          owner_signature: { type: 'string', nullable: true },
+          is_active: { type: 'boolean' },
+          address: {
+            type: 'string',
+            nullable: true,
+            description: 'Endereço principal formatado',
+          },
+          addresses: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/StoreAddressInput' },
+          },
+          contacts: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/StoreContactInput' },
+          },
+          created_at: { type: 'string', format: 'date-time' },
+          updated_at: { type: 'string', format: 'date-time' },
+        },
+      },
+    },
   },
   security: [{ bearerAuth: [] }],
   paths: {
@@ -295,6 +378,115 @@ const swaggerDocument = {
           { in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } },
         ],
         responses: { 200: { description: 'Excluída com sucesso' } },
+      },
+    },
+
+    // ==========================================
+    // STORES (LOJAS)
+    // ==========================================
+    '/api/stores': {
+      get: {
+        summary: 'Listar lojas',
+        description:
+          'Retorna as lojas com endereço principal, endereços e contatos vinculados. Requer perfil admin ou owner.',
+        tags: ['Stores'],
+        parameters: [
+          {
+            in: 'query',
+            name: 'showInactive',
+            schema: { type: 'boolean' },
+            required: false,
+            description: 'Quando true, inclui também as lojas inativas',
+          },
+        ],
+        responses: {
+          200: { description: 'Lista de lojas retornada com sucesso' },
+          401: { description: 'Não autenticado' },
+          403: { description: 'Sem permissão (apenas admin/owner)' },
+        },
+      },
+      post: {
+        summary: 'Cadastrar nova loja',
+        description:
+          'Cria a loja e, se informados, vincula contatos e endereços via store_id. Requer perfil admin ou owner.',
+        tags: ['Stores'],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/StoreInput' },
+            },
+          },
+        },
+        responses: {
+          201: { description: 'Loja criada com sucesso' },
+          400: { description: 'Dados inválidos (nome, CNPJ, CPF ou contatos)' },
+          401: { description: 'Não autenticado' },
+          403: { description: 'Sem permissão (apenas admin/owner)' },
+        },
+      },
+    },
+    '/api/stores/for-transfer': {
+      get: {
+        summary: 'Listar lojas disponíveis para transferência',
+        description:
+          'Retorna todas as lojas ativas, exceto a do usuário logado. Acessível por qualquer usuário autenticado com loja associada.',
+        tags: ['Stores'],
+        responses: {
+          200: { description: 'Lista de lojas retornada com sucesso' },
+          400: { description: 'Usuário não possui loja associada' },
+          401: { description: 'Não autenticado' },
+        },
+      },
+    },
+    '/api/stores/{id}': {
+      get: {
+        summary: 'Buscar loja por ID',
+        description: 'Retorna a loja com todos os endereços e contatos vinculados.',
+        tags: ['Stores'],
+        parameters: [
+          { in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } },
+        ],
+        responses: {
+          200: { description: 'Dados da loja' },
+          404: { description: 'Loja não encontrada' },
+        },
+      },
+      put: {
+        summary: 'Atualizar loja (parcial)',
+        description:
+          'Atualização parcial: apenas os campos enviados são alterados. Se os arrays contacts ou addresses forem enviados, eles substituem completamente os registros vinculados (sincronização); se omitidos, são mantidos.',
+        tags: ['Stores'],
+        parameters: [
+          { in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/StoreInput' },
+            },
+          },
+        },
+        responses: {
+          200: { description: 'Loja atualizada com sucesso' },
+          400: { description: 'Dados inválidos' },
+          404: { description: 'Loja não encontrada' },
+        },
+      },
+    },
+    '/api/stores/{id}/active': {
+      patch: {
+        summary: 'Ativar/Inativar loja',
+        description: 'Alterna o status is_active da loja. Requer perfil admin ou owner.',
+        tags: ['Stores'],
+        parameters: [
+          { in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } },
+        ],
+        responses: {
+          200: { description: 'Status da loja alterado com sucesso' },
+          404: { description: 'Loja não encontrada' },
+        },
       },
     },
 
@@ -864,7 +1056,8 @@ const swaggerDocument = {
                 properties: {
                   lessee_signature: {
                     type: 'string',
-                    description: 'Assinatura da locatária como data URL (data:image/png;base64,...)',
+                    description:
+                      'Assinatura da locatária como data URL (data:image/png;base64,...)',
                   },
                 },
               },

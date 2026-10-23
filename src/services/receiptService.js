@@ -36,6 +36,14 @@ const formatDateTime = (value) => (value ? new Date(value).toLocaleString('pt-BR
 
 const formatDate = (value) => (value ? new Date(value).toLocaleDateString('pt-BR') : '-');
 
+// Pick the store's main phone-like contact (primary first)
+const getStorePhone = (store) => {
+  const contact = (store?.contacts || [])
+    .filter((c) => ['whatsapp', 'mobile', 'landline'].includes(c.type))
+    .sort((a, b) => (b.is_primary || 0) - (a.is_primary || 0))[0];
+  return contact?.value || null;
+};
+
 /**
  * Renders the receipt PDF with PT-BR labels.
  */
@@ -57,7 +65,8 @@ function generateReceiptPdf(outputPath, data) {
     doc.fontSize(10);
     doc.text(`Nome: ${store?.name || rental.store_name || '-'}`);
     if (store?.address) doc.text(`Endereço: ${store.address}`);
-    if (store?.phone) doc.text(`Telefone: ${store.phone}`);
+    const storePhone = getStorePhone(store);
+    if (storePhone) doc.text(`Telefone: ${storePhone}`);
     doc.moveDown();
 
     // Customer info
