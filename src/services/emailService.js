@@ -9,8 +9,8 @@ const transporter = nodemailer.createTransport({
     pass: process.env.EMAIL_PASS,
   },
   tls: {
-    rejectUnauthorized: false // Ajuda em alguns servidores compartilhados que dão erro de certificado
-  }
+    rejectUnauthorized: false, // Ajuda em alguns servidores compartilhados que dão erro de certificado
+  },
 });
 
 /**
@@ -19,8 +19,10 @@ const transporter = nodemailer.createTransport({
  * @param {string} subject - Assunto
  * @param {string} text - Corpo em texto puro
  * @param {string} html - (Opcional) Corpo em HTML
+ * @param {Array} [attachments] - (Opcional) Anexos no formato do nodemailer
+ *   (ex.: { filename, path } ou { filename, content })
  */
-exports.sendEmail = async ({ to, subject, text, html }) => {
+exports.sendEmail = async ({ to, subject, text, html, attachments }) => {
   try {
     const info = await transporter.sendMail({
       from: process.env.EMAIL_FROM, // Ex: '"Tech-S" <no-reply@techs.com>'
@@ -28,6 +30,7 @@ exports.sendEmail = async ({ to, subject, text, html }) => {
       subject,
       text,
       html: html || text, // Se não tiver HTML, usa o texto
+      attachments,
     });
 
     console.log('Message sent: %s', info.messageId);

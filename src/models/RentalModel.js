@@ -34,7 +34,7 @@ class RentalModel {
 
     // 2. Itens do Aluguel
     const sqlItems = `
-      SELECT ri.*, p.name as product_name, p.code as product_code, pi.url_thumb as image_url
+      SELECT ri.*, p.name as product_name, p.code as product_code, p.color, p.size, p.brand, pi.url_thumb as image_url
       FROM rental_items ri
       JOIN products p ON ri.product_id = p.id
       LEFT JOIN product_images pi ON p.id = pi.product_id AND pi.is_main = 1

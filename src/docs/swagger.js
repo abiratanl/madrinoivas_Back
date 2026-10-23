@@ -842,6 +842,135 @@ const swaggerDocument = {
         },
       },
     },
+    // ==========================================
+    // RENTAL CONTRACTS
+    // ==========================================
+    '/api/rentals/{id}/contract': {
+      post: {
+        summary: 'Gerar contrato de locação com assinatura digital da locatária',
+        description:
+          'Gera o PDF do contrato de locação com a assinatura da locatária (data URL PNG/JPEG capturada no signature pad), assina com o assinador configurado (PDF_SIGNER) e registra na tabela contracts. O PDF não é persistido: é re-renderizado sob demanda a partir da assinatura armazenada.',
+        tags: ['Contracts'],
+        parameters: [
+          { in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['lessee_signature'],
+                properties: {
+                  lessee_signature: {
+                    type: 'string',
+                    description: 'Assinatura da locatária como data URL (data:image/png;base64,...)',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          201: {
+            description:
+              'Contrato gerado com sucesso. Retorna data.id (id do contrato) e data.pdf_url (/api/contracts/{id}/pdf).',
+          },
+          400: { description: 'Assinatura ausente ou inválida.' },
+          404: { description: 'Aluguel não encontrado.' },
+          422: { description: 'Aluguel cancelado — não é possível gerar contrato.' },
+          500: { description: 'Erro ao gerar contrato.' },
+        },
+      },
+    },
+    '/api/rentals/{id}/contract/pdf': {
+      get: {
+        summary: 'Baixar o PDF do contrato mais recente de um aluguel',
+        tags: ['Contracts'],
+        parameters: [
+          { in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } },
+        ],
+        responses: {
+          200: {
+            description: 'PDF do contrato mais recente do aluguel (application/pdf), inline.',
+            content: { 'application/pdf': { schema: { type: 'string', format: 'binary' } } },
+          },
+          404: { description: 'Nenhum contrato gerado para este aluguel.' },
+        },
+      },
+    },
+    '/api/contracts/{id}/pdf': {
+      get: {
+        summary: 'Baixar o PDF assinado do contrato',
+        tags: ['Contracts'],
+        parameters: [
+          { in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } },
+        ],
+        responses: {
+          200: {
+            description: 'PDF do contrato (application/pdf), inline.',
+            content: { 'application/pdf': { schema: { type: 'string', format: 'binary' } } },
+          },
+          404: { description: 'Contrato não encontrado.' },
+          500: { description: 'Erro ao baixar o contrato.' },
+        },
+      },
+    },
+    '/api/contracts/{id}/send-email': {
+      post: {
+        summary: 'Enviar o contrato assinado por e-mail (PDF anexo)',
+        tags: ['Contracts'],
+        parameters: [
+          { in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['email'],
+                properties: { email: { type: 'string', format: 'email' } },
+              },
+            },
+          },
+        },
+        responses: {
+          200: { description: 'Contrato enviado. Retorna data.emailDeliveryStatus (sent).' },
+          400: { description: 'E-mail não informado.' },
+          404: { description: 'Contrato não encontrado.' },
+          502: { description: 'Falha na entrega do e-mail.' },
+        },
+      },
+    },
+    '/api/contracts/{id}/send-whatsapp': {
+      post: {
+        summary: 'Enviar o contrato assinado via WhatsApp (PDF)',
+        tags: ['Contracts'],
+        parameters: [
+          { in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['phone'],
+                properties: { phone: { type: 'string', example: '12999998888' } },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'Retorna data.whatsappDeliveryStatus (sent|failed).',
+          },
+          400: { description: 'Telefone não informado.' },
+          404: { description: 'Contrato não encontrado.' },
+        },
+      },
+    },
   },
 };
 

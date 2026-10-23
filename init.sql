@@ -325,3 +325,27 @@ CREATE TABLE IF NOT EXISTS `receipts` (
   CONSTRAINT `fk_receipts_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`),
   CONSTRAINT `fk_receipts_created_by` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- =================================================================================
+-- 16. CONTRACTS
+-- Rental contracts generated with the lessee digital signature. The signed PDF
+-- is not persisted: it is re-rendered on demand from the stored signature.
+-- =================================================================================
+CREATE TABLE IF NOT EXISTS `contracts` (
+  `id` char(36) NOT NULL,
+  `rental_id` char(36) NOT NULL,
+  `customer_id` char(36) NOT NULL,
+  `lessee_signature` mediumtext NOT NULL COMMENT 'Lessee signature as a PNG data URL',
+  `issued_at` datetime NOT NULL,
+  `created_by` char(36) DEFAULT NULL,
+  `whatsapp_delivery_status` enum('pending','sent','failed') NOT NULL DEFAULT 'pending',
+  `email_delivery_status` enum('pending','sent','failed') NOT NULL DEFAULT 'pending',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `fk_contracts_rental` (`rental_id`),
+  KEY `fk_contracts_customer` (`customer_id`),
+  KEY `fk_contracts_created_by` (`created_by`),
+  CONSTRAINT `fk_contracts_rental` FOREIGN KEY (`rental_id`) REFERENCES `rentals` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_contracts_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`),
+  CONSTRAINT `fk_contracts_created_by` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

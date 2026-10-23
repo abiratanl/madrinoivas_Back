@@ -12,6 +12,7 @@ const categoryRoutes = require('./routes/categoryRoutes');
 const collectionRoutes = require('./routes/collectionRoutes');
 const customerRoutes = require('./routes/customerRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
+const contractRoutes = require('./routes/contractRoutes');
 const productRoutes = require('./routes/productRoutes');
 const rentalRoutes = require('./routes/rentalRoutes');
 const storeRoutes = require('./routes/storeRoutes');
@@ -50,7 +51,8 @@ app.use(
 );
 
 // --- GLOBAL MIDDLEWARES ---
-app.use(express.json());
+// Larger JSON limit to accept the lessee signature (base64 data URL) on contract generation
+app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 // ==================================================================================
@@ -124,6 +126,7 @@ app.use('/api/collections', collectionRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/payments', paymentRoutes);
+app.use('/api/contracts', contractRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/rentals', rentalRoutes);
 app.use('/api/stores', storeRoutes);
