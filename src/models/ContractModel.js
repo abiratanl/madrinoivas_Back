@@ -17,7 +17,7 @@ class ContractModel {
        VALUES (?, ?, ?, ?, ?, ?)`,
       [id, rentalId, customerId, lesseeSignature, issuedAt, createdBy || null],
     );
-    return { id, rentalId, customerId, lesseeSignature, issuedAt, createdBy };
+    return ContractModel.findById(id);
   }
 
   /**

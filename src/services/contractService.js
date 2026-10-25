@@ -39,6 +39,65 @@ const formatDateLong = (value) =>
       })
     : '-';
 
+const formatDateTime = (value) =>
+  value
+    ? new Date(value).toLocaleString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : '-';
+
+const PAYMENT_METHOD_LABELS = {
+  pix: 'PIX',
+  credit_card: 'Cartão de Crédito',
+  debit_card: 'Cartão de Débito',
+  cash: 'Dinheiro',
+  bank_transfer: 'Transferência Bancária',
+};
+
+// Lessor (Madri Noivas) legal identification used as fallback when the store
+// record does not carry the full legal data.
+const LESSOR_LEGAL_NAME = 'TERESA FRANCA DE OLIVEIRA FRANCISCO (ME)';
+const LESSOR_TRADE_NAME = 'MADRI NOIVAS TRAJES A RIGOR';
+const LESSOR_CNPJ = '07.846.246/0001-28';
+const LESSOR_ADDRESS = 'Rua Dr. Castro Santos, nº 98, Centro, Guaratinguetá - SP, CEP 12505-010';
+const LESSOR_REPRESENTATIVE = 'Teresa França de Oliveira Francisco';
+const CONTRACT_CITY = 'Guaratinguetá';
+const CONTRACT_STATE = 'SP';
+
+const formatAddressLine = (address) => {
+  if (!address) return null;
+  const parts = [address.street, `nº ${address.number}`];
+  if (address.complement) parts.push(address.complement);
+  if (address.neighborhood) parts.push(`- ${address.neighborhood}`);
+  return parts.filter(Boolean).join(' ');
+};
+
+// Pick the customer's default address (first as fallback)
+const getCustomerAddress = (customer) => {
+  const addresses = customer?.addresses || [];
+  return addresses.find((a) => a.is_default) || addresses[0] || null;
+};
+
+// Pick the customer's main phone-like contact (primary first)
+const getCustomerPhone = (customer) => {
+  const contact = (customer?.contacts || [])
+    .filter((c) => ['whatsapp', 'mobile', 'landline'].includes(c.type))
+    .sort((a, b) => (b.is_primary || 0) - (a.is_primary || 0))[0];
+  return contact?.value || null;
+};
+
+// Pick the customer's main e-mail contact (primary first)
+const getCustomerEmail = (customer) => {
+  const contact = (customer?.contacts || [])
+    .filter((c) => c.type === 'email')
+    .sort((a, b) => (b.is_primary || 0) - (a.is_primary || 0))[0];
+  return contact?.value || null;
+};
+
 /**
  * Extracts the raw image buffer from a signature data URL.
  * Returns null when the value is not a valid PNG/JPEG data URL.
@@ -58,7 +117,7 @@ function signatureToBuffer(dataUrl) {
  * frontend ContractPreview, and embeds the lessee signature image.
  */
 function generateContractPdf(outputPath, data) {
-  const { contract, rental, customer, store, totalPaid, issuedBy, issuedAt } = data;
+  const { contract, rental, customer, store, totalPaid, payments, issuedBy, issuedAt } = data;
 
   const totalAmount = parseFloat(rental.total_amount || 0);
   const balanceDue = Math.max(totalAmount - parseFloat(totalPaid || 0), 0);
@@ -70,8 +129,27 @@ function generateContractPdf(outputPath, data) {
   );
   const extraDailyRate = totalAmount / rentalDays;
   const primaryAddress = (store?.addresses || [])[0] || null;
-  const storeCity = primaryAddress?.city || '';
-  const storeState = primaryAddress?.state || '';
+  const storeCity = primaryAddress?.city || CONTRACT_CITY;
+  const storeState = primaryAddress?.state || CONTRACT_STATE;
+
+  // Party qualification, with lessor legal fallback constants
+  const lessorName = store?.name || rental.store_name || LESSOR_TRADE_NAME;
+  const lessorCnpj = store?.cnpj || LESSOR_CNPJ;
+  const lessorAddress = store?.address || formatAddressLine(primaryAddress) || LESSOR_ADDRESS;
+  const lessorRepresentative = store?.owner_name || LESSOR_REPRESENTATIVE;
+
+  const customerAddress = getCustomerAddress(customer);
+  const lesseeAddressLine = customerAddress
+    ? [
+        formatAddressLine(customerAddress),
+        [customerAddress.city, customerAddress.state].filter(Boolean).join(' - '),
+        customerAddress.zip_code ? `CEP ${customerAddress.zip_code}` : null,
+      ]
+        .filter(Boolean)
+        .join(', ')
+    : null;
+  const lesseePhone = getCustomerPhone(customer);
+  const lesseeEmail = getCustomerEmail(customer);
 
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: 'A4', margin: 50 });
@@ -79,11 +157,12 @@ function generateContractPdf(outputPath, data) {
     doc.pipe(stream);
 
     // Store header
-    doc.fontSize(16).text((store?.name || rental.store_name || 'Madri Noivas').toUpperCase(), {
+    doc.fontSize(16).text(lessorName.toUpperCase(), {
       align: 'center',
     });
     doc.fontSize(9);
-    if (store?.address) doc.text(store.address, { align: 'center' });
+    doc.text(lessorAddress, { align: 'center' });
+    doc.text(`CNPJ: ${lessorCnpj}`, { align: 'center' });
     const storePhone = getStorePhone(store);
     if (storePhone) doc.text(`Telefone: ${storePhone}`, { align: 'center' });
     doc.moveDown(0.5);
@@ -96,6 +175,27 @@ function generateContractPdf(outputPath, data) {
     doc
       .fontSize(9)
       .text(`Contrato Nº: ${contract.id.slice(0, 8).toUpperCase()}`, { align: 'center' });
+    doc.moveDown(1);
+
+    // Parties qualification
+    doc.fontSize(11).text('Das Partes');
+    doc.fontSize(9);
+    doc.text(
+      `LOCADORA: ${LESSOR_LEGAL_NAME}, nome fantasia ${lessorName}, CNPJ nº ${lessorCnpj}, ` +
+        `com sede em ${lessorAddress}, neste ato representada por ${lessorRepresentative}.`,
+    );
+    doc.moveDown(0.3);
+    const lesseeQualification = [
+      `LOCATÁRIA(O): ${customer?.name || rental.customer_name || '-'}`,
+      customer?.cpf ? `CPF nº ${customer.cpf}` : null,
+      customer?.rg ? `RG nº ${customer.rg}` : null,
+      lesseeAddressLine ? `residente e domiciliada(o) em ${lesseeAddressLine}` : null,
+      lesseePhone ? `telefone ${lesseePhone}` : null,
+      lesseeEmail ? `e-mail ${lesseeEmail}` : null,
+    ]
+      .filter(Boolean)
+      .join(', ');
+    doc.text(`${lesseeQualification}.`);
     doc.moveDown(1);
 
     // Clause 1 - Object
@@ -143,6 +243,17 @@ function generateContractPdf(outputPath, data) {
       `• Saldo Restante: ${formatCurrency(balanceDue)} — deverá ser quitado no ato da retirada da peça.`,
       { indent: 10 },
     );
+    const confirmedPayments = (payments || []).filter((p) => p.status !== 'cancelled');
+    if (confirmedPayments.length > 0) {
+      doc.text('• Pagamentos registrados até a emissão deste contrato:', { indent: 10 });
+      for (const payment of confirmedPayments) {
+        const methodLabel = PAYMENT_METHOD_LABELS[payment.payment_method] || 'Outro';
+        doc.text(
+          `- ${formatDateTime(payment.paid_at)} — ${methodLabel}: ${formatCurrency(payment.amount)}`,
+          { indent: 24 },
+        );
+      }
+    }
     doc.moveDown(0.8);
 
     // Clause 4 - Lessee obligations
@@ -177,16 +288,23 @@ function generateContractPdf(outputPath, data) {
     doc
       .fontSize(9)
       .text(
-        `Fica eleito o foro da Comarca de ${storeCity || '________'} - ${storeState || '__'} para dirimir quaisquer dúvidas decorrentes deste contrato.`,
+        `Fica eleito o foro da Comarca de ${storeCity} - ${storeState} para dirimir quaisquer dúvidas decorrentes deste contrato.`,
       );
     doc.moveDown(2);
 
-    // Signatures
+    // Signatures (start a new page when the block would not fit)
+    if (doc.y > 620) {
+      doc.addPage();
+    }
     const signatureTop = doc.y;
     const leftX = 80;
     const rightX = 330;
     const lineWidth = 190;
 
+    const lessorSignatureBuffer = signatureToBuffer(store?.owner_signature);
+    if (lessorSignatureBuffer) {
+      doc.image(lessorSignatureBuffer, leftX + 35, signatureTop - 10, { width: 120 });
+    }
     doc
       .moveTo(leftX, signatureTop + 60)
       .lineTo(leftX + lineWidth, signatureTop + 60)
@@ -194,7 +312,11 @@ function generateContractPdf(outputPath, data) {
     doc
       .fontSize(9)
       .text('LOCADORA', leftX, signatureTop + 65, { width: lineWidth, align: 'center' });
-    doc.text(store?.name || rental.store_name || '', leftX, signatureTop + 78, {
+    doc.text(lessorName, leftX, signatureTop + 78, {
+      width: lineWidth,
+      align: 'center',
+    });
+    doc.text(`CNPJ: ${lessorCnpj}`, leftX, signatureTop + 90, {
       width: lineWidth,
       align: 'center',
     });
@@ -218,10 +340,16 @@ function generateContractPdf(outputPath, data) {
         align: 'center',
       });
     }
+    doc.text(
+      `Assinado digitalmente em ${formatDateTime(contract.issued_at || issuedAt)}`,
+      rightX,
+      signatureTop + 103,
+      { width: lineWidth, align: 'center' },
+    );
 
-    doc.y = signatureTop + 110;
+    doc.y = signatureTop + 120;
     doc.moveDown(1);
-    doc.text(`${storeCity || '________'} - ${storeState || '__'}, ${formatDateLong(issuedAt)}.`, {
+    doc.text(`${storeCity} - ${storeState}, ${formatDateLong(contract.issued_at || issuedAt)}.`, {
       align: 'center',
     });
     doc.moveDown(0.5);
@@ -255,8 +383,10 @@ async function loadContractData(contract, userId) {
   const store = await StoreModel.findById(rental.store_id);
   const issuedBy = userId ? await UserModel.findById(userId) : null;
   const totalPaid = await PaymentModel.getTotalPaidByRentalId(rental.id);
+  // Chronological order for the contract payment history
+  const payments = (await PaymentModel.findByRentalId(rental.id)).reverse();
 
-  return { rental, customer, store, issuedBy, totalPaid };
+  return { rental, customer, store, issuedBy, totalPaid, payments };
 }
 
 /**
