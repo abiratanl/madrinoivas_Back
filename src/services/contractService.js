@@ -21,33 +21,24 @@ const formatCurrency = (value) =>
     .replace('.', ',')
     .replace(/\B(?=(\d{3})+(?!\d))/g, '.')}`;
 
-const formatDate = (value) => (value ? new Date(value).toLocaleDateString('pt-BR') : '-');
-
-// Pick the store's main phone-like contact (primary first)
-const getStorePhone = (store) => {
-  const contact = (store?.contacts || [])
-    .filter((c) => ['whatsapp', 'mobile', 'landline'].includes(c.type))
-    .sort((a, b) => (b.is_primary || 0) - (a.is_primary || 0))[0];
-  return contact?.value || null;
+// Date-only values (rental start/end) must not be shifted by the UTC offset.
+const parseDateValue = (value) => {
+  if (typeof value === 'string') {
+    const datePart = value.slice(0, 10);
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(datePart);
+    if (match) {
+      return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+    }
+  }
+  return new Date(value);
 };
 
 const formatDateLong = (value) =>
   value
-    ? new Date(value).toLocaleDateString('pt-BR', {
+    ? parseDateValue(value).toLocaleDateString('pt-BR', {
         day: '2-digit',
         month: 'long',
         year: 'numeric',
-      })
-    : '-';
-
-const formatDateTime = (value) =>
-  value
-    ? new Date(value).toLocaleString('pt-BR', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
       })
     : '-';
 
@@ -68,14 +59,6 @@ const LESSOR_ADDRESS = 'Rua Dr. Castro Santos, nº 98, Centro, Guaratinguetá - 
 const LESSOR_REPRESENTATIVE = 'Teresa França de Oliveira Francisco';
 const CONTRACT_CITY = 'Guaratinguetá';
 const CONTRACT_STATE = 'SP';
-
-const formatAddressLine = (address) => {
-  if (!address) return null;
-  const parts = [address.street, `nº ${address.number}`];
-  if (address.complement) parts.push(address.complement);
-  if (address.neighborhood) parts.push(`- ${address.neighborhood}`);
-  return parts.filter(Boolean).join(' ');
-};
 
 // Pick the customer's default address (first as fallback)
 const getCustomerAddress = (customer) => {
@@ -99,6 +82,41 @@ const getCustomerEmail = (customer) => {
   return contact?.value || null;
 };
 
+// Human-readable description of every rented item, used in Clause One.
+const getItemsDescription = (items = []) => {
+  const descriptions = items.map((item) => {
+    const details = [
+      item.product_name || item.product_id,
+      item.color ? `cor ${item.color}` : null,
+      item.size ? `tamanho ${item.size}` : null,
+      item.brand ? `marca ${item.brand}` : null,
+    ].filter(Boolean);
+    return `${details.join(', ')} (Qtd: ${item.quantity || 1})`;
+  });
+  return descriptions.length > 0 ? descriptions.join('; ') : '-';
+};
+
+// Down payment (sinal/entrada): the entry payment when present, otherwise the
+// first confirmed payment registered for the rental.
+const getDownPayment = (payments = []) => {
+  const confirmed = payments
+    .filter((payment) => payment.status !== 'cancelled')
+    .slice()
+    .sort((a, b) => new Date(a.paid_at).getTime() - new Date(b.paid_at).getTime());
+  return confirmed.find((payment) => payment.type === 'entry') || confirmed[0] || null;
+};
+
+const formatFittingDate = (value) =>
+  value
+    ? new Date(value).toLocaleString('pt-BR', {
+        day: '2-digit',
+        month: 'long',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : 'A definir';
+
 /**
  * Extracts the raw image buffer from a signature data URL.
  * Returns null when the value is not a valid PNG/JPEG data URL.
@@ -118,243 +136,270 @@ function signatureToBuffer(dataUrl) {
  * frontend ContractPreview, and embeds the lessee signature image.
  */
 function generateContractPdf(outputPath, data) {
-  const { contract, rental, customer, store, totalPaid, payments, issuedBy, issuedAt } = data;
+  const { contract, rental, customer, store, totalPaid, payments, issuedAt } = data;
 
-  const totalAmount = parseFloat(rental.total_amount || 0);
-  const balanceDue = Math.max(totalAmount - parseFloat(totalPaid || 0), 0);
-  const rentalDays = Math.max(
-    1,
-    Math.ceil(
-      (new Date(rental.end_date_scheduled) - new Date(rental.start_date)) / (1000 * 60 * 60 * 24),
-    ),
-  );
-  const extraDailyRate = totalAmount / rentalDays;
+  const totalAmount = parseFloat(rental.total_amount || rental.total_price || 0);
+  const paidAmount = parseFloat(totalPaid || 0);
+  const remainingBalance = Math.max(totalAmount - paidAmount, 0);
+  const downPayment = getDownPayment(payments);
+  const downPaymentAmount = downPayment ? parseFloat(downPayment.amount || 0) : 0;
+  const downPaymentMethod = downPayment
+    ? PAYMENT_METHOD_LABELS[downPayment.payment_method] || downPayment.payment_method
+    : '-';
+
+  const customerAddress = getCustomerAddress(customer) || {};
+  const lesseeName = customer?.name || rental.customer_name || '-';
+  const lesseeCpf = customer?.cpf || rental.customer_cpf || '-';
+  const lesseeRg = customer?.rg || '-';
+  const lesseePhone = getCustomerPhone(customer) || '-';
+  const lesseeEmail = getCustomerEmail(customer) || '-';
+  const itemsDescription = getItemsDescription(rental.items);
+  const issuedDate = contract.issued_at || issuedAt;
   const primaryAddress = (store?.addresses || [])[0] || null;
+  const lessorCnpj = store?.cnpj || LESSOR_CNPJ;
+  const lessorAddress =
+    store?.address ||
+    (primaryAddress?.street
+      ? `${primaryAddress.street}, nº ${primaryAddress.number} - ${primaryAddress.neighborhood}, ${primaryAddress.city} - ${primaryAddress.state}, CEP ${primaryAddress.zip_code}`
+      : LESSOR_ADDRESS);
+  const lessorRepresentative = store?.owner_name || LESSOR_REPRESENTATIVE;
   const storeCity = primaryAddress?.city || CONTRACT_CITY;
   const storeState = primaryAddress?.state || CONTRACT_STATE;
-
-  // Party qualification, with lessor legal fallback constants
-  const lessorName = store?.name || rental.store_name || LESSOR_TRADE_NAME;
-  const lessorCnpj = store?.cnpj || LESSOR_CNPJ;
-  const lessorAddress = store?.address || formatAddressLine(primaryAddress) || LESSOR_ADDRESS;
-  const lessorRepresentative = store?.owner_name || LESSOR_REPRESENTATIVE;
-
-  const customerAddress = getCustomerAddress(customer);
-  const lesseeAddressLine = customerAddress
-    ? [
-        formatAddressLine(customerAddress),
-        [customerAddress.city, customerAddress.state].filter(Boolean).join(' - '),
-        customerAddress.zip_code ? `CEP ${customerAddress.zip_code}` : null,
-      ]
-        .filter(Boolean)
-        .join(', ')
-    : null;
-  const lesseePhone = getCustomerPhone(customer);
-  const lesseeEmail = getCustomerEmail(customer);
 
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: 'A4', margin: 50 });
     const stream = fs.createWriteStream(outputPath);
     doc.pipe(stream);
 
-    // Store header
-    doc.fontSize(16).text(lessorName.toUpperCase(), {
-      align: 'center',
-    });
-    doc.fontSize(9);
-    doc.text(lessorAddress, { align: 'center' });
-    doc.text(`CNPJ: ${lessorCnpj}`, { align: 'center' });
-    const storePhone = getStorePhone(store);
-    if (storePhone) doc.text(`Telefone: ${storePhone}`, { align: 'center' });
-    doc.moveDown(0.5);
-    doc.moveTo(50, doc.y).lineTo(545, doc.y).stroke();
-    doc.moveDown(1);
+    const heading = (text) => {
+      doc.moveDown(0.8);
+      doc.font('Helvetica-Bold').fontSize(10.5).text(text.toUpperCase());
+      doc.moveDown(0.25);
+    };
 
-    doc
-      .fontSize(13)
-      .text('CONTRATO DE LOCAÇÃO DE VESTUÁRIO E ACESSÓRIOS', { align: 'center', underline: true });
-    doc
-      .fontSize(9)
-      .text(`Contrato Nº: ${contract.id.slice(0, 8).toUpperCase()}`, { align: 'center' });
-    doc.moveDown(1);
+    const paragraph = (text, options = {}) => {
+      doc
+        .font('Helvetica')
+        .fontSize(9.5)
+        .text(text, { align: 'justify', lineGap: 1.5, ...options });
+    };
 
-    // Parties qualification
-    doc.fontSize(11).text('Das Partes');
-    doc.fontSize(9);
-    doc.text(
-      `LOCADORA: ${LESSOR_LEGAL_NAME}, nome fantasia ${lessorName}, CNPJ nº ${lessorCnpj}, ` +
-        `com sede em ${lessorAddress}, neste ato representada por ${lessorRepresentative}.`,
-    );
-    doc.moveDown(0.3);
-    const lesseeQualification = [
-      `LOCATÁRIA(O): ${customer?.name || rental.customer_name || '-'}`,
-      customer?.cpf ? `CPF nº ${customer.cpf}` : null,
-      customer?.rg ? `RG nº ${customer.rg}` : null,
-      lesseeAddressLine ? `residente e domiciliada(o) em ${lesseeAddressLine}` : null,
-      lesseePhone ? `telefone ${lesseePhone}` : null,
-      lesseeEmail ? `e-mail ${lesseeEmail}` : null,
-    ]
-      .filter(Boolean)
-      .join(', ');
-    doc.text(`${lesseeQualification}.`);
-    doc.moveDown(1);
-
-    // Clause 1 - Object
-    doc.fontSize(11).text('Cláusula 1ª – Do Objeto');
-    doc
-      .fontSize(9)
-      .text(
-        'O presente contrato tem como objeto a locação da(s) seguinte(s) peça(s) de vestuário/acessório(s):',
-      );
-    for (const item of rental.items || []) {
-      const description = [
-        item.product_name || item.product_id,
-        item.color ? `cor ${item.color}` : null,
-        item.size ? `tamanho ${item.size}` : null,
-        item.brand ? `marca ${item.brand}` : null,
-      ]
-        .filter(Boolean)
-        .join(', ');
-      doc.text(
-        `• ${description} (x${item.quantity || 1}) — Valor: ${formatCurrency(item.unit_price)}`,
-        { indent: 10 },
-      );
-    }
-    doc.moveDown(0.8);
-
-    // Clause 2 - Term
-    doc.fontSize(11).text('Cláusula 2ª – Do Prazo da Locação');
-    doc.fontSize(9);
-    doc.text(`• Data de Retirada/Entrega: ${formatDate(rental.start_date)}`, { indent: 10 });
-    doc.text(`• Data de Devolução: ${formatDate(rental.end_date_scheduled)}`, { indent: 10 });
-    doc.text(
-      '• O prazo de locação é certo e determinado, encerrando-se obrigatoriamente na data de devolução estipulada acima.',
-      { indent: 10 },
-    );
-    doc.moveDown(0.8);
-
-    // Clause 3 - Price and payment
-    doc.fontSize(11).text('Cláusula 3ª – Do Valor e Forma de Pagamento');
-    doc.fontSize(9);
-    doc.text(`• Valor Total do Aluguel: ${formatCurrency(totalAmount)}`, { indent: 10 });
-    doc.text(`• Valor Já Pago (reserva/amortizações): ${formatCurrency(totalPaid)}`, {
-      indent: 10,
-    });
-    doc.text(
-      `• Saldo Restante: ${formatCurrency(balanceDue)} — deverá ser quitado no ato da retirada da peça.`,
-      { indent: 10 },
-    );
-    const confirmedPayments = (payments || []).filter((p) => p.status !== 'cancelled');
-    if (confirmedPayments.length > 0) {
-      doc.text('• Pagamentos registrados até a emissão deste contrato:', { indent: 10 });
-      for (const payment of confirmedPayments) {
-        const methodLabel = PAYMENT_METHOD_LABELS[payment.payment_method] || 'Outro';
-        doc.text(
-          `- ${formatDateTime(payment.paid_at)} — ${methodLabel}: ${formatCurrency(payment.amount)}`,
-          { indent: 24 },
-        );
+    const bullet = (label, value) => {
+      doc.font('Helvetica').fontSize(9.5);
+      if (label) {
+        doc.font('Helvetica-Bold').text(`• ${label}: `, { continued: true, indent: 12 });
+        doc.font('Helvetica').text(String(value ?? '-'));
+      } else {
+        doc.text(`• ${value}`);
       }
-    }
-    doc.moveDown(0.8);
+    };
 
-    // Clause 4 - Lessee obligations
-    doc.fontSize(11).text('Cláusula 4ª – Das Obrigações da Locatária(O)');
-    doc.fontSize(9);
-    doc.text(
-      '1. Utilizar a peça com cautela, evitando danos, manchas severas, rasgos ou alterações (como barras ou ajustes não autorizados).',
-      { indent: 10 },
-    );
-    doc.text(
-      '2. Não lavar ou passar a peça, devendo devolvê-la nas mesmas condições em que foi recebida.',
-      { indent: 10 },
-    );
-    doc.text('3. Devolver o produto no prazo estabelecido na Cláusula 2ª.', { indent: 10 });
-    doc.moveDown(0.8);
-
-    // Clause 5 - Delays, damage and loss
-    doc.fontSize(11).text('Cláusula 5ª – Atrasos, Danos e Extravio');
-    doc.fontSize(9);
-    doc.text(
-      `• Atraso na Devolução: será cobrada uma taxa de diária adicional no valor de ${formatCurrency(extraDailyRate)} por dia de atraso.`,
-      { indent: 10 },
-    );
-    doc.text(
-      '• Danos à Peça: havendo danos reparáveis (manchas profundas ou rasgos), a Locatária(O) arcará com o custo do conserto/lavagem especializada. Caso o dano seja irreparável ou ocorra extravio/roubo, será cobrado o valor integral de venda da peça descrito pela Locadora.',
-      { indent: 10 },
-    );
-    doc.moveDown(0.8);
-
-    // Clause 6 - Jurisdiction
-    doc.fontSize(11).text('Cláusula 6ª – Do Foro');
     doc
-      .fontSize(9)
-      .text(
-        `Fica eleito o foro da Comarca de ${storeCity} - ${storeState} para dirimir quaisquer dúvidas decorrentes deste contrato.`,
-      );
-    doc.moveDown(2);
+      .font('Helvetica-Bold')
+      .fontSize(13.5)
+      .text('CONTRATO DE PRESTAÇÃO DE SERVIÇOS E LOCAÇÃO DE TRAJES A RIGOR', {
+        align: 'center',
+      });
+    doc
+      .font('Helvetica')
+      .fontSize(8.5)
+      .text(`Contrato Nº: ${contract.id.slice(0, 8).toUpperCase()}`, { align: 'center' });
+
+    paragraph('Pelo presente instrumento particular, de um lado:');
+
+    heading('LOCADORA');
+    bullet('Razão Social', LESSOR_LEGAL_NAME);
+    bullet('Nome Fantasia', LESSOR_TRADE_NAME);
+    bullet('CNPJ', lessorCnpj);
+    bullet('Endereço', lessorAddress);
+    bullet('Representante Legal', lessorRepresentative);
+
+    paragraph('E, de outro lado:');
+
+    heading('LOCATÁRIO(A)');
+    bullet('Nome/Razão Social', lesseeName);
+    bullet('CPF/CNPJ', lesseeCpf);
+    bullet('RG', lesseeRg);
+    bullet(
+      'Endereço',
+      `${customerAddress.street || '-'}, nº ${customerAddress.number || '-'} - ${
+        customerAddress.neighborhood || '-'
+      }`,
+    );
+    bullet(
+      'Cidade/UF',
+      `${customerAddress.city || '-'}/${customerAddress.state || '-'} - CEP: ${customerAddress.zip_code || '-'}`,
+    );
+    bullet('Telefone/WhatsApp', lesseePhone);
+    bullet('E-mail', lesseeEmail);
+
+    paragraph(
+      'As partes acima qualificadas têm entre si, justo e contratado, o presente Contrato de Locação de Trajes a Rigor, mediante as cláusulas e condições a seguir descritas:',
+    );
+
+    heading('CLÁUSULA PRIMEIRA – DO OBJETO');
+    paragraph(
+      'O presente contrato tem por objeto a locação do(s) traje(s) e acessório(s) discriminado(s) abaixo, para uso exclusivo do(a) LOCATÁRIO(A) na data estipulada neste instrumento:',
+    );
+    bullet('Descrição dos Trajes / Itens', itemsDescription);
+
+    heading('CLÁUSULA SEGUNDA – DO CRONOGRAMA DA LOCAÇÃO');
+    paragraph('A locação obedecerá rigorosamente às seguintes datas e prazos agendados:');
+    bullet('1. Data do Evento (Uso Reservado)', formatDateLong(rental.start_date));
+    bullet('2. Data/Hora Agendada para a Prova', formatFittingDate(rental.fitting_date));
+    bullet('3. Data Prevista para Devolução', formatDateLong(rental.end_date_scheduled));
+    paragraph(
+      'Parágrafo Único: O(A) LOCATÁRIO(A) compromete-se a comparecer na data agendada para a Prova, sob pena de inviabilizar os ajustes necessários no traje para a data do evento.',
+    );
+
+    heading('CLÁUSULA TERCEIRA – DO PREÇO E CONDICIONAMENTO FINANCEIRO');
+    paragraph(
+      'O valor total desta locação e o plano de pagamento pactuado estão definidos no seguinte resumo financeiro:',
+    );
+    bullet('Valor Total do Aluguel', formatCurrency(totalAmount));
+    bullet(
+      'Sinal / Entrada Recebido',
+      `${formatCurrency(downPaymentAmount)} (Forma de Pagamento: ${downPaymentMethod})`,
+    );
+    bullet('Saldo Devedor Restante', formatCurrency(remainingBalance));
+    paragraph(
+      'Parágrafo Primeiro: O valor referente ao Sinal/Entrada tem caráter confirmatório da reserva. Em caso de desistência imotivada por parte do(a) LOCATÁRIO(A), o valor do sinal cobrirá os custos de reserva de agenda do traje e não será restituído.',
+    );
+    paragraph(
+      'Parágrafo Segundo: O saldo devedor restante deverá ser integralmente quitado até a data de retirada do traje, sob pena de retenção do bem até a efetiva quitação.',
+    );
+
+    heading('CLÁUSULA QUARTA – DA CONSERVAÇÃO E DANOS');
+    paragraph(
+      'O(A) LOCATÁRIO(A) declara receber o(s) traje(s) em perfeitas condições de uso, higienizado(s) e sem defeitos aparentes, comprometendo-se a devolvê-lo(s) nas mesmas condições.',
+    );
+    paragraph(
+      'Parágrafo Único: Danos irreparáveis, manchas definitivas (tintas, queimaduras de cigarro/vela), rasgos ou extravio total do traje obrigarão o(a) LOCATÁRIO(A) ao pagamento do valor comercial de venda do item, descontados os valores já pagos no aluguel.',
+    );
+
+    heading('CLÁUSULA QUINTA – ATRASO NA DEVOLUÇÃO');
+    paragraph(
+      `A não devolução do traje na data limite estabelecida na Cláusula Segunda (${formatDateLong(
+        rental.end_date_scheduled,
+      )}) sujeitará o(a) LOCATÁRIO(A) ao pagamento de multa diária correspondente a 10% (dez por cento) sobre o valor total do contrato por dia de atraso, sem prejuízo de perdas e danos caso o atraso comprometa a locação do mesmo traje para outro cliente.`,
+    );
+
+    heading('CLÁUSULA SEXTA – PROTEÇÃO E TRATAMENTO DE DADOS (LGPD)');
+    paragraph(
+      'Em conformidade com a Lei Geral de Proteção de Dados Pessoais (Lei nº 13.709/2018 - LGPD):',
+    );
+    paragraph(
+      '1. A LOCADORA coleta e armazena os dados pessoais do(a) LOCATÁRIO(A) (Nome, CPF, RG, Endereço, Telefone e E-mail) exclusivamente para fins de execução deste contrato, emissão de comprovantes financeiros, identificação do(a) LOCATÁRIO(A) e contato operacional referente à prova e devolução dos trajes.',
+    );
+    paragraph(
+      '2. A LOCADORA compromete-se a adotar medidas de segurança administrativas e tecnológicas para proteger os dados pessoais do(a) LOCATÁRIO(A) contra acessos não autorizados ou vazamentos.',
+    );
+    paragraph(
+      '3. Os dados coletados não serão compartilhados com terceiros, exceto quando estritamente necessário para cumprimento de obrigação legal ou cobrança judicial/extrajudicial em caso de inadimplemento.',
+    );
+
+    heading('CLÁUSULA SÉTIMA – DA VALIDADE DA ASSINATURA ELETRÔNICA / DIGITALIZADA');
+    paragraph(
+      'As partes expressamente concordam e reconhecem a validade, integridade e eficácia jurídica deste instrumento assinado por meio eletrônico, digitalizado ou mediante aplicação de imagem da assinatura do representante legal da LOCADORA, nos termos do art. 10, § 2º, da Medida Provisória nº 2.200-2/2001 e da Lei nº 14.063/2020, reconhecendo-o como título executivo extrajudicial bastante para todos os fins de direito.',
+    );
+
+    heading('CLÁUSULA OITAVA – DO FORO');
+    paragraph(
+      `Para dirimir quaisquer controvérsias oriundas do presente contrato, as partes elegem o Foro da Comarca de ${storeCity} - ${storeState}, com renúncia expressa a qualquer outro, por mais privilegiado que seja.`,
+    );
+
+    paragraph(
+      'E, por estarem assim justos e contratados, assinam o presente instrumento para que produza seus jurídicos e legais efeitos.',
+    );
+    doc
+      .font('Helvetica')
+      .fontSize(9.5)
+      .text(`${storeCity} - ${storeState}, ${formatDateLong(issuedDate)}.`, { align: 'center' });
 
     // Signatures (start a new page when the block would not fit)
-    if (doc.y > 620) {
+    doc.moveDown(1.2);
+    if (doc.y > 600) {
       doc.addPage();
     }
+
+    const headingY = doc.y;
+    doc.font('Helvetica-Bold').fontSize(11).text('ASSINATURAS', { align: 'center' });
+    doc.y = headingY + 24;
+
     const signatureTop = doc.y;
-    const leftX = 80;
-    const rightX = 330;
-    const lineWidth = 190;
+    const leftX = 60;
+    const rightX = 305;
+    const lineWidth = 220;
 
     const lessorSignatureBuffer = signatureToBuffer(store?.owner_signature);
+    doc
+      .font('Helvetica')
+      .fontSize(7.5)
+      .text('(Assinatura Digitalizada/Escaneada do Representante Legal)', leftX, signatureTop, {
+        width: lineWidth,
+        align: 'center',
+      });
     if (lessorSignatureBuffer) {
-      doc.image(lessorSignatureBuffer, leftX + 35, signatureTop - 10, { width: 120 });
+      doc.image(lessorSignatureBuffer, leftX + 50, signatureTop + 12, { width: 120 });
     }
     doc
       .moveTo(leftX, signatureTop + 60)
       .lineTo(leftX + lineWidth, signatureTop + 60)
       .stroke();
     doc
-      .fontSize(9)
-      .text('LOCADORA', leftX, signatureTop + 65, { width: lineWidth, align: 'center' });
-    doc.text(lessorName, leftX, signatureTop + 78, {
+      .font('Helvetica-Bold')
+      .fontSize(8.5)
+      .text(LESSOR_LEGAL_NAME, leftX, signatureTop + 65, {
+        width: lineWidth,
+        align: 'center',
+      });
+    doc.font('Helvetica').fontSize(8);
+    doc.text(LESSOR_TRADE_NAME, leftX, signatureTop + 76, { width: lineWidth, align: 'center' });
+    doc.text(`CNPJ: ${lessorCnpj}`, leftX, signatureTop + 87, {
       width: lineWidth,
       align: 'center',
     });
-    doc.text(`CNPJ: ${lessorCnpj}`, leftX, signatureTop + 90, {
+    doc.text(`Representante Legal: ${lessorRepresentative}`, leftX, signatureTop + 98, {
       width: lineWidth,
       align: 'center',
     });
 
     const signatureBuffer = signatureToBuffer(contract.lessee_signature);
+    doc
+      .font('Helvetica')
+      .fontSize(7.5)
+      .text('(ASSINATURA NA TELA DO TABLET)', rightX, signatureTop, {
+        width: lineWidth,
+        align: 'center',
+      });
     if (signatureBuffer) {
-      doc.image(signatureBuffer, rightX + 35, signatureTop - 10, { width: 120 });
+      doc.image(signatureBuffer, rightX + 50, signatureTop + 12, { width: 120 });
     }
     doc
       .moveTo(rightX, signatureTop + 60)
       .lineTo(rightX + lineWidth, signatureTop + 60)
       .stroke();
-    doc.text('LOCATÁRIA(O)', rightX, signatureTop + 65, { width: lineWidth, align: 'center' });
-    doc.text(customer?.name || rental.customer_name || '', rightX, signatureTop + 78, {
-      width: lineWidth,
-      align: 'center',
-    });
-    if (customer?.cpf) {
-      doc.text(`CPF: ${customer.cpf}`, rightX, signatureTop + 90, {
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(8.5)
+      .text(lesseeName, rightX, signatureTop + 65, {
         width: lineWidth,
         align: 'center',
       });
-    }
-    doc.text(
-      `Assinado digitalmente em ${formatDateTime(contract.issued_at || issuedAt)}`,
-      rightX,
-      signatureTop + 103,
-      { width: lineWidth, align: 'center' },
-    );
-
-    doc.y = signatureTop + 120;
-    doc.moveDown(1);
-    doc.text(`${storeCity} - ${storeState}, ${formatDateLong(contract.issued_at || issuedAt)}.`, {
-      align: 'center',
-    });
-    doc.moveDown(0.5);
-    doc.text(`Emitido por: ${issuedBy?.name || '-'}`, { align: 'center' });
+    doc
+      .font('Helvetica')
+      .fontSize(8)
+      .text(`CPF: ${lesseeCpf}`, rightX, signatureTop + 76, {
+        width: lineWidth,
+        align: 'center',
+      });
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(8)
+      .text('LOCATÁRIO', rightX, signatureTop + 88, {
+        width: lineWidth,
+        align: 'center',
+      });
 
     doc.end();
     stream.on('finish', resolve);
@@ -501,8 +546,8 @@ exports.sendContractEmail = async (contractId, email, userId) => {
   try {
     const sent = await emailService.sendEmail({
       to: email,
-      subject: `Contrato de Locação - ${data.store?.name || 'Madri Noivas'}`,
-      text: `Olá, ${data.customer?.name || 'cliente'}! Segue em anexo o seu contrato de locação (Contrato Nº ${contract.id
+      subject: `Contrato de Prestação de Serviços e Locação de Trajes a Rigor - ${data.store?.name || 'Madri Noivas'}`,
+      text: `Olá, ${data.customer?.name || 'cliente'}! Segue em anexo o seu Contrato de Prestação de Serviços e Locação de Trajes a Rigor (Contrato Nº ${contract.id
         .slice(0, 8)
         .toUpperCase()}).`,
       attachments: [
@@ -545,7 +590,7 @@ exports.sendContractWhatsApp = async (contractId, phone, userId) => {
       to: phone,
       filePath: signedPath,
       fileName: `contrato_${contract.id.slice(0, 8)}.pdf`,
-      caption: `Contrato de locação - ${data.store?.name || 'Madri Noivas'}`,
+      caption: `Contrato de Prestação de Serviços e Locação de Trajes a Rigor - ${data.store?.name || 'Madri Noivas'}`,
     });
     deliveryStatus = sent ? 'sent' : 'failed';
   } catch (error) {
