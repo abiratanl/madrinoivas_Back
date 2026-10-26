@@ -103,6 +103,7 @@ const buildQueryResult = (sql, params = []) => {
           total_rentals: 10,
           active_rentals: 3,
           revenue: '5000.00',
+          contracted_value: '20000.00',
           total_products: 25,
           active_products: 20,
           occupied_products: 10,
@@ -175,7 +176,7 @@ const buildQueryResult = (sql, params = []) => {
   }
 
   if (query.includes('FROM rentals') && query.includes('AS active')) {
-    return [[{ total: 10, active: 4 }]];
+    return [[{ total: 10, active: 4, contracted_revenue: '30000.00' }]];
   }
 
   if (query.includes('JOIN collections c')) {
@@ -419,14 +420,17 @@ describe('Dashboard API', () => {
     expect(res.body.data.stores).toHaveLength(1);
     expect(res.body.data.comparison.previous_revenue).toBeNull();
     expect(res.body.data.comparison.growth_percentage).toBeNull();
-    expect(res.body.data.summary.delinquency_rate).toBeCloseTo(3.6);
+    expect(res.body.data.summary.delinquency_rate).toBe(25);
+    expect(res.body.data.summary.average_ticket).toBe(3000);
+    expect(res.body.data.summary.contracted_revenue).toBe(30000);
     expect(res.body.data.receivables_forecast).toHaveLength(6);
     expect(res.body.data.receivables_forecast[0]).toEqual({
       month: currentMonth,
       total: 900,
       count: 3,
     });
-    expect(res.body.data.stores[0].average_ticket).toBe(500);
+    expect(res.body.data.stores[0].average_ticket).toBe(2000);
+    expect(res.body.data.stores[0].contracted_value).toBe(20000);
     expect(res.body.data.stores[0].occupancy_rate).toBe(50);
     expect(res.body.data.stores[0].turnover_rate).toBe(0.7);
     expect(res.body.data.top_collections[0].name).toBe('Noivas 2026');
@@ -438,6 +442,7 @@ describe('Dashboard API', () => {
     });
     expect(res.body.data.inventory.paid_off_count).toBe(1);
     expect(res.body.data.inventory.stale_count).toBe(2);
+    expect(db.query.mock.calls.some(([sql]) => sql.includes('WHERE s.is_active = 1'))).toBe(true);
   });
 
   it('GET /api/dashboard/general › should apply the requested period filter', async () => {
@@ -485,6 +490,8 @@ describe('Dashboard API', () => {
     expect(res.body.data.store.id).toBe('store-A');
     expect(res.body.data.summary.active_rentals).toBe(4);
     expect(res.body.data.summary.late_rentals).toBe(1);
+    expect(res.body.data.summary.average_ticket).toBe(3000);
+    expect(res.body.data.summary.delinquency_rate).toBe(25);
     expect(res.body.data.upcoming_rentals).toHaveLength(1);
     expect(res.body.data.today_operations).toHaveLength(2);
     expect(res.body.data.today_operations[0].event_type).toBe('pickup');

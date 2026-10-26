@@ -170,8 +170,20 @@ const getRentalCounts = async (storeId, period) => {
 
   const [rows] = await db.query(
     `SELECT
-       COALESCE(SUM(status <> 'cancelled'), 0) AS total,
-       COALESCE(SUM(status IN ('reserved', 'picked_up', 'late')), 0) AS active
+       COALESCE(
+         SUM(CASE WHEN status NOT IN ('budget', 'cancelled') THEN 1 ELSE 0 END),
+         0
+       ) AS total,
+       COALESCE(SUM(status IN ('reserved', 'picked_up', 'late')), 0) AS active,
+       COALESCE(
+         SUM(
+           CASE
+             WHEN status NOT IN ('budget', 'cancelled') THEN total_amount
+             ELSE 0
+           END
+         ),
+         0
+       ) AS contracted_revenue
      FROM rentals
      WHERE 1 = 1 ${storeFilter} ${periodFilter}`,
     params,
@@ -180,6 +192,7 @@ const getRentalCounts = async (storeId, period) => {
   return {
     total_rentals: toNumber(rows[0]?.total),
     active_rentals: toNumber(rows[0]?.active),
+    contracted_revenue: toNumber(rows[0]?.contracted_revenue),
   };
 };
 
@@ -470,7 +483,9 @@ const getStorePerformance = async (period) => {
        (
          SELECT COUNT(*)
          FROM rentals r
-         WHERE r.store_id = s.id AND r.status <> 'cancelled' ${rentalPeriodFilter}
+         WHERE r.store_id = s.id
+           AND r.status NOT IN ('budget', 'cancelled')
+           ${rentalPeriodFilter}
        ) AS total_rentals,
        (
          SELECT COUNT(*)
@@ -484,6 +499,13 @@ const getStorePerformance = async (period) => {
          JOIN rentals r ON r.id = p.rental_id
          WHERE r.store_id = s.id AND p.status = 'confirmed' ${paymentPeriodFilter}
        ) AS revenue,
+       (
+         SELECT COALESCE(SUM(r.total_amount), 0)
+         FROM rentals r
+         WHERE r.store_id = s.id
+           AND r.status NOT IN ('budget', 'cancelled')
+           ${rentalPeriodFilter}
+       ) AS contracted_value,
        (
          SELECT COUNT(*)
          FROM products pr
@@ -510,15 +532,19 @@ const getStorePerformance = async (period) => {
        (
          SELECT COUNT(DISTINCT r.customer_id)
          FROM rentals r
-         WHERE r.store_id = s.id AND r.status <> 'cancelled' ${rentalPeriodFilter}
+         WHERE r.store_id = s.id
+           AND r.status NOT IN ('budget', 'cancelled')
+           ${rentalPeriodFilter}
        ) AS total_customers
      FROM stores s
+     WHERE s.is_active = 1
      ORDER BY s.name ASC`,
   );
 
   return rows.map((row) => {
     const totalRentals = toNumber(row.total_rentals);
     const revenue = toNumber(row.revenue);
+    const contractedValue = toNumber(row.contracted_value);
     const activeProducts = toNumber(row.active_products);
     const occupiedProducts = toNumber(row.occupied_products);
     const itemsRented = toNumber(row.items_rented);
@@ -532,7 +558,8 @@ const getStorePerformance = async (period) => {
       total_rentals: totalRentals,
       active_rentals: toNumber(row.active_rentals),
       revenue,
-      average_ticket: totalRentals > 0 ? revenue / totalRentals : 0,
+      contracted_value: contractedValue,
+      average_ticket: totalRentals > 0 ? roundTwo(contractedValue / totalRentals) : 0,
       total_products: toNumber(row.total_products),
       active_products: activeProducts,
       occupied_products: occupiedProducts,
@@ -1146,9 +1173,13 @@ exports.getGeneralDashboard = async (req, res) => {
     ]);
 
     const { previous_revenue, growth_percentage, ...revenueSummary } = revenue;
+    const averageTicket =
+      rentalCounts.total_rentals > 0
+        ? roundTwo(rentalCounts.contracted_revenue / rentalCounts.total_rentals)
+        : 0;
     const delinquencyRate =
-      revenueSummary.total_revenue > 0
-        ? roundTwo((overdueReceivables.overdue_receivables / revenueSummary.total_revenue) * 100)
+      pendingReceivables > 0
+        ? roundTwo((overdueReceivables.overdue_receivables / pendingReceivables) * 100)
         : 0;
 
     return res.status(200).json({
@@ -1163,6 +1194,7 @@ exports.getGeneralDashboard = async (req, res) => {
         summary: {
           ...revenueSummary,
           ...rentalCounts,
+          average_ticket: averageTicket,
           pending_receivables: pendingReceivables,
           ...overdueReceivables,
           delinquency_rate: delinquencyRate,
@@ -1254,9 +1286,13 @@ exports.getLocalDashboard = async (req, res) => {
     ]);
 
     const { previous_revenue, growth_percentage, ...revenueSummary } = revenue;
+    const averageTicket =
+      rentalCounts.total_rentals > 0
+        ? roundTwo(rentalCounts.contracted_revenue / rentalCounts.total_rentals)
+        : 0;
     const delinquencyRate =
-      revenueSummary.total_revenue > 0
-        ? roundTwo((overdueReceivables.overdue_receivables / revenueSummary.total_revenue) * 100)
+      pendingReceivables > 0
+        ? roundTwo((overdueReceivables.overdue_receivables / pendingReceivables) * 100)
         : 0;
     const availability = {
       total: productCounts.total_products,
@@ -1284,6 +1320,7 @@ exports.getLocalDashboard = async (req, res) => {
         summary: {
           ...revenueSummary,
           ...rentalCounts,
+          average_ticket: averageTicket,
           late_rentals: getLateRentals(rentalStatusBreakdown),
           pending_receivables: pendingReceivables,
           ...overdueReceivables,
