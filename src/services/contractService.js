@@ -10,6 +10,7 @@ const PaymentModel = require('../models/PaymentModel');
 const ContractModel = require('../models/ContractModel');
 const whatsappService = require('./whatsappService');
 const emailService = require('./emailService');
+const { downloadFile, extractKey } = require('./uploadService');
 const signer = require('./signing');
 
 const SIGNATURE_DATA_URL_REGEX = /^data:image\/(png|jpe?g);base64,([A-Za-z0-9+/=\s]+)$/;
@@ -381,6 +382,20 @@ async function loadContractData(contract, userId) {
   }
   const customer = await CustomerModel.findById(contract.customer_id);
   const store = await StoreModel.findById(rental.store_id);
+
+  // Store signatures are persisted as R2 object keys (paths). Load the image so
+  // it can be embedded in the PDF; legacy data URLs keep working as-is.
+  if (store?.owner_signature) {
+    const signatureKey = extractKey(store.owner_signature);
+    if (signatureKey) {
+      try {
+        const buffer = await downloadFile(signatureKey);
+        store.owner_signature = `data:image/png;base64,${buffer.toString('base64')}`;
+      } catch (error) {
+        console.error('Erro ao carregar assinatura da loja:', error.message);
+      }
+    }
+  }
   const issuedBy = userId ? await UserModel.findById(userId) : null;
   const totalPaid = await PaymentModel.getTotalPaidByRentalId(rental.id);
   // Chronological order for the contract payment history

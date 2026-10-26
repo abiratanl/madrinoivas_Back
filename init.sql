@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS `stores` (
   `is_active` tinyint(1) NOT NULL DEFAULT '1',
   `owner_name` varchar(255) DEFAULT NULL COMMENT 'Legal representative name',
   `owner_cpf` varchar(14) DEFAULT NULL COMMENT 'Legal representative CPF',
-  `owner_signature` mediumtext COMMENT 'Scanned owner signature as a data URL',
+  `owner_signature` mediumtext COMMENT 'Owner signature image path in R2 storage',
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)

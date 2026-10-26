@@ -2,8 +2,8 @@ const db = require('../config/database');
 
 /**
  * Migration: store legal/representative fields.
- * Adds cnpj, owner_name, owner_cpf and owner_signature (scanned signature as
- * a data URL) to the stores table. Used on the rental contract PDF.
+ * Adds cnpj, owner_name, owner_cpf and owner_signature (R2 object path) to
+ * the stores table. Used on the rental contract PDF.
  * Idempotent: each column is guarded by an information_schema check.
  */
 async function migrate() {
@@ -21,7 +21,7 @@ async function migrate() {
     },
     {
       name: 'owner_signature',
-      ddl: "ADD COLUMN owner_signature mediumtext COMMENT 'Scanned owner signature as a data URL' AFTER owner_cpf",
+      ddl: "ADD COLUMN owner_signature mediumtext COMMENT 'Owner signature image path in R2 storage' AFTER owner_cpf",
     },
   ];
 
