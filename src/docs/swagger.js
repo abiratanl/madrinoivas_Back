@@ -1057,7 +1057,7 @@ const swaggerDocument = {
       post: {
         summary: 'Gerar contrato de locação com assinatura digital da locatária',
         description:
-          'Gera o PDF do contrato de locação com a assinatura da locatária (data URL PNG/JPEG capturada no signature pad), assina com o assinador configurado (PDF_SIGNER) e registra na tabela contracts. O PDF não é persistido: é re-renderizado sob demanda a partir da assinatura armazenada.',
+          'Fluxo de compatibilidade: gera o draft, persiste no R2, assina e persiste o PDF definitivo no R2. Prefira POST /api/contracts/generate seguido de POST /api/contracts/{id}/sign.',
         tags: ['Contracts'],
         parameters: [
           { in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } },
@@ -1187,6 +1187,118 @@ const swaggerDocument = {
             content: { 'application/pdf': { schema: { type: 'string', format: 'binary' } } },
           },
           404: { description: 'Nenhum contrato gerado para este aluguel.' },
+        },
+      },
+    },
+    '/api/contracts/generate': {
+      post: {
+        summary: 'Gerar o PDF original (draft) do contrato e persistir no R2',
+        description:
+          'Gera o número sequencial do contrato (PREFIXO-AAAA-0001) em uma transação com SELECT ... FOR UPDATE, injeta o número no cabeçalho do PDF, calcula o hash SHA-256 e armazena o arquivo original no Cloudflare R2 (draft_pdf_path). O contrato fica com status pending_signature, aguardando a assinatura no tablet.',
+        tags: ['Contracts'],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['rental_id'],
+                properties: {
+                  rental_id: { type: 'string', format: 'uuid' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          201: {
+            description:
+              'Draft gerado. Retorna data.id, data.contract_number, data.status, data.document_hash, data.draft_pdf_path e data.draft_pdf_url.',
+          },
+          400: { description: 'Aluguel não informado.' },
+          404: { description: 'Aluguel não encontrado.' },
+          422: { description: 'Aluguel cancelado.' },
+          500: { description: 'Erro ao gerar o contrato.' },
+        },
+      },
+    },
+    '/api/contracts/{id}/sign': {
+      post: {
+        summary: 'Assinar o contrato e persistir o PDF definitivo no R2',
+        description:
+          'Baixa o PDF original do R2, valida o hash SHA-256, insere a assinatura da locatária na última página, armazena o PDF definitivo no R2 (signed_pdf_path) e registra signed_at, signer_ip e device_user_agent. Em seguida dispara o envio automático por WhatsApp e e-mail quando houver contatos cadastrados.',
+        tags: ['Contracts'],
+        parameters: [
+          { in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['lessee_signature'],
+                properties: {
+                  lessee_signature: {
+                    type: 'string',
+                    description:
+                      'Assinatura da locatária como data URL (data:image/png;base64,...)',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description:
+              'Contrato assinado. Retorna data.contract_number, data.status, data.document_hash, data.signed_at, data.signer_ip, data.device_user_agent, data.signed_pdf_path e data.pdf_url.',
+          },
+          400: { description: 'Assinatura ausente ou inválida.' },
+          404: { description: 'Contrato não encontrado.' },
+          409: { description: 'Contrato já assinado ou draft indisponível/integro.' },
+          422: { description: 'Aluguel cancelado.' },
+          500: { description: 'Erro ao assinar o contrato.' },
+        },
+      },
+    },
+    '/api/contracts/{id}/cancel': {
+      post: {
+        summary: 'Cancelar um contrato',
+        description:
+          'Cancela o contrato, altera o status para cancelled e registra o motivo em notes. Permitido para admin, owner e local_manager. O contrato cancelado mantém seus PDFs e hash para auditoria, e um novo contrato pode ser emitido para o mesmo aluguel.',
+        tags: ['Contracts'],
+        parameters: [
+          { in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['notes'],
+                properties: {
+                  notes: {
+                    type: 'string',
+                    maxLength: 2000,
+                    description: 'Motivo do cancelamento do contrato.',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description:
+              'Contrato cancelado. Retorna data.id, data.contract_number, data.status e data.notes.',
+          },
+          400: { description: 'Motivo do cancelamento ausente ou inválido.' },
+          403: { description: 'Perfil sem permissão para cancelar contratos.' },
+          404: { description: 'Contrato não encontrado.' },
+          409: { description: 'Contrato já cancelado.' },
+          500: { description: 'Erro ao cancelar o contrato.' },
         },
       },
     },

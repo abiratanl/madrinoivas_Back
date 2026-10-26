@@ -1,7 +1,11 @@
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const PDFDocument = require('pdfkit');
+const { PDFDocument: PdfLibDocument } = require('pdf-lib');
+const { v4: uuidv4 } = require('uuid');
+const db = require('../config/database');
 const RentalModel = require('../models/RentalModel');
 const CustomerModel = require('../models/CustomerModel');
 const StoreModel = require('../models/StoreModel');
@@ -10,10 +14,56 @@ const PaymentModel = require('../models/PaymentModel');
 const ContractModel = require('../models/ContractModel');
 const whatsappService = require('./whatsappService');
 const emailService = require('./emailService');
-const { downloadFile, extractKey } = require('./uploadService');
+const { uploadBuffer, downloadFile, extractKey, getPublicUrl } = require('./uploadService');
 const signer = require('./signing');
 
 const SIGNATURE_DATA_URL_REGEX = /^data:image\/(png|jpe?g);base64,([A-Za-z0-9+/=\s]+)$/;
+const SIGNATURE_BLOCK_BOTTOM_OFFSET = 190;
+const SIGNATURE_LINE_OFFSET = 60;
+const SIGNATURE_BLOCK_GAP = 30;
+const SIGNATURE_BLOCK_HEIGHT = 115;
+const SIGNATURE_LINE_METADATA_REGEX = /madri-signature-line-y=([\d.]+)/;
+const SIGNATURE_IMAGE_X = 355;
+const SIGNATURE_IMAGE_WIDTH = 120;
+const CONTRACTS_R2_FOLDER = 'contracts';
+const DEFAULT_CONTRACT_PREFIX = 'MADRI';
+const CONTRACT_NUMBER_MAX_ATTEMPTS = 3;
+const TRANSIENT_DB_ERRORS = new Set(['ER_DUP_ENTRY', 'ER_LOCK_DEADLOCK', 'ER_LOCK_WAIT_TIMEOUT']);
+
+const sha256 = (buffer) => crypto.createHash('sha256').update(buffer).digest('hex');
+
+const buildContractPdfKey = (rentalId, contractId, fileName) =>
+  `${CONTRACTS_R2_FOLDER}/${rentalId}/${contractId}/${fileName}`;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const normalizeContractPrefix = (value) => {
+  const normalized = String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+  return normalized || DEFAULT_CONTRACT_PREFIX;
+};
+
+const resolveContractPrefix = (store) =>
+  normalizeContractPrefix(
+    store?.contract_number_prefix ||
+      store?.contract_prefix ||
+      process.env.CONTRACT_NUMBER_PREFIX ||
+      DEFAULT_CONTRACT_PREFIX,
+  );
+
+const getContractNumberLabel = (contract) =>
+  contract.contract_number ||
+  String(contract.id || '')
+    .slice(0, 8)
+    .toUpperCase();
+
+const buildContractFileName = (contract) =>
+  `contrato_${(contract.contract_number || String(contract.id || '').slice(0, 8)).replace(
+    /[^A-Za-z0-9_-]/g,
+    '-',
+  )}.pdf`;
 
 const formatCurrency = (value) =>
   `R$ ${parseFloat(value || 0)
@@ -132,6 +182,64 @@ function signatureToBuffer(dataUrl) {
 }
 
 /**
+ * Overlays the lessee signature image onto the lessee signature area of the
+ * draft PDF. The original draft bytes are used as the base document, so no
+ * content is re-rendered and the signed file preserves the audited draft.
+ */
+async function embedLesseeSignature(draftBuffer, lesseeSignature, metadata = {}) {
+  const match = lesseeSignature.match(SIGNATURE_DATA_URL_REGEX);
+  const signatureBuffer = signatureToBuffer(lesseeSignature);
+  if (!match || !signatureBuffer) {
+    throw new Error('INVALID_SIGNATURE');
+  }
+
+  const pdfDoc = await PdfLibDocument.load(draftBuffer);
+  const pages = pdfDoc.getPages();
+  const lastPage = pages[pages.length - 1];
+
+  const image =
+    match[1] === 'png'
+      ? await pdfDoc.embedPng(signatureBuffer)
+      : await pdfDoc.embedJpg(signatureBuffer);
+
+  let drawWidth = SIGNATURE_IMAGE_WIDTH;
+  let drawHeight = (image.height / image.width) * drawWidth;
+  const maxHeight = 45;
+  if (drawHeight > maxHeight) {
+    drawHeight = maxHeight;
+    drawWidth = (image.width / image.height) * drawHeight;
+  }
+
+  // The draft stores the exact signature-line position in its metadata so the
+  // overlay stays aligned even though the line now follows the document text
+  // instead of a fixed bottom offset. Older drafts fall back to the constant.
+  let signatureLineBottomY = SIGNATURE_BLOCK_BOTTOM_OFFSET - SIGNATURE_LINE_OFFSET;
+  const metadataLine = SIGNATURE_LINE_METADATA_REGEX.exec(pdfDoc.getKeywords() || '');
+  if (metadataLine) {
+    signatureLineBottomY = Number.parseFloat(metadataLine[1]);
+  }
+
+  lastPage.drawImage(image, {
+    x: SIGNATURE_IMAGE_X + (SIGNATURE_IMAGE_WIDTH - drawWidth) / 2,
+    y: signatureLineBottomY + 3,
+    width: drawWidth,
+    height: drawHeight,
+  });
+
+  if (metadata.documentHash) {
+    pdfDoc.setSubject(
+      `Contrato assinado eletronicamente. Hash SHA-256 do original: ${metadata.documentHash}`,
+    );
+  }
+  if (metadata.signedAt) {
+    pdfDoc.setCreationDate(new Date(metadata.signedAt));
+    pdfDoc.setModificationDate(new Date(metadata.signedAt));
+  }
+
+  return Buffer.from(await pdfDoc.save());
+}
+
+/**
  * Renders the rental contract PDF with PT-BR clauses, mirroring the
  * frontend ContractPreview, and embeds the lessee signature image.
  */
@@ -196,14 +304,18 @@ function generateContractPdf(outputPath, data) {
 
     doc
       .font('Helvetica-Bold')
-      .fontSize(13.5)
+      .fontSize(12.5)
       .text('CONTRATO DE PRESTAÇÃO DE SERVIÇOS E LOCAÇÃO DE TRAJES A RIGOR', {
         align: 'center',
       });
+    doc.moveDown(0.6);
     doc
       .font('Helvetica')
       .fontSize(8.5)
-      .text(`Contrato Nº: ${contract.id.slice(0, 8).toUpperCase()}`, { align: 'center' });
+      .text(`CONTRATO Nº: ${getContractNumberLabel(contract)}`, {
+        align: 'center',
+      });
+    doc.moveDown(1.4);
 
     paragraph('Pelo presente instrumento particular, de um lado:');
 
@@ -311,29 +423,41 @@ function generateContractPdf(outputPath, data) {
     paragraph(
       'E, por estarem assim justos e contratados, assinam o presente instrumento para que produza seus jurídicos e legais efeitos.',
     );
+    // Keep the date and the signature block together. If there is not enough
+    // room left on the page, move both to the next page before writing them.
+    const dateTextHeight = 14;
+    const requiredSpace = dateTextHeight + SIGNATURE_BLOCK_GAP + SIGNATURE_BLOCK_HEIGHT;
+    if (doc.y + requiredSpace > doc.page.height - doc.page.margins.bottom) {
+      doc.addPage();
+    }
+
     doc
       .font('Helvetica')
       .fontSize(9.5)
       .text(`${storeCity} - ${storeState}, ${formatDateLong(issuedDate)}.`, { align: 'center' });
 
-    // Signatures (start a new page when the block would not fit)
-    doc.moveDown(1.2);
-    if (doc.y > 600) {
-      doc.addPage();
-    }
+    // Signatures follow the document flow. The line position is persisted in
+    // the PDF metadata so the signature overlay can be applied to the exact
+    // audited draft without re-rendering the document.
+    const signatureTop = doc.y + SIGNATURE_BLOCK_GAP;
+    const signatureLineYFromBottom = doc.page.height - (signatureTop + SIGNATURE_LINE_OFFSET);
+    doc.info.Keywords = `madri-signature-line-y=${signatureLineYFromBottom.toFixed(2)}`;
 
-    const signatureTop = doc.y + 24;
     const leftX = 60;
     const rightX = 305;
     const lineWidth = 220;
 
     const lessorSignatureBuffer = signatureToBuffer(store?.owner_signature);
     if (lessorSignatureBuffer) {
-      doc.image(lessorSignatureBuffer, leftX + 50, signatureTop + 12, { width: 120 });
+      doc.image(lessorSignatureBuffer, leftX, signatureTop, {
+        fit: [lineWidth, SIGNATURE_LINE_OFFSET - 6],
+        align: 'center',
+        valign: 'bottom',
+      });
     }
     doc
-      .moveTo(leftX, signatureTop + 60)
-      .lineTo(leftX + lineWidth, signatureTop + 60)
+      .moveTo(leftX, signatureTop + SIGNATURE_LINE_OFFSET)
+      .lineTo(leftX + lineWidth, signatureTop + SIGNATURE_LINE_OFFSET)
       .stroke();
     doc
       .font('Helvetica-Bold')
@@ -400,6 +524,23 @@ async function safeUnlink(filePath) {
 }
 
 /**
+ * Renders the contract PDF into a Buffer (via a short-lived temp file).
+ */
+async function renderContractPdfBuffer(contract, data) {
+  const outputPath = path.join(
+    os.tmpdir(),
+    `contrato_${contract.id}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.pdf`,
+  );
+
+  try {
+    await generateContractPdf(outputPath, { contract, ...data });
+    return await fs.promises.readFile(outputPath);
+  } finally {
+    await safeUnlink(outputPath);
+  }
+}
+
+/**
  * Loads every entity needed to render the contract PDF.
  */
 async function loadContractData(contract, userId) {
@@ -451,6 +592,30 @@ async function renderSignedPdf(contract, data) {
 }
 
 /**
+ * Materializes the definitive signed PDF in a temp file. New contracts are
+ * read from the immutable signed_pdf_path in R2; legacy contracts fall back
+ * to rendering the PDF from the stored signature.
+ */
+async function materializeSignedPdf(contract, data) {
+  if (contract.signed_pdf_path) {
+    const key = extractKey(contract.signed_pdf_path);
+    if (key) {
+      const buffer = await downloadFile(key);
+      const filePath = path.join(
+        os.tmpdir(),
+        `contrato_${contract.id}_signed_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.pdf`,
+      );
+      await fs.promises.writeFile(filePath, buffer);
+      return { filePath, cleanup: () => safeUnlink(filePath) };
+    }
+  }
+
+  const { unsignedPath, signedPath } = await renderSignedPdf(contract, data);
+  await safeUnlink(unsignedPath);
+  return { filePath: signedPath, cleanup: () => safeUnlink(signedPath) };
+}
+
+/**
  * Renders the unsigned contract preview for a rental into a temp PDF. The
  * lessee signature area is left blank so the customer can read the document
  * before signing it on the tablet.
@@ -471,6 +636,7 @@ async function renderContractPreviewPdf(rentalId, userId) {
     id: rental.id,
     rental_id: rental.id,
     customer_id: rental.customer_id,
+    contract_number: 'A DEFINIR',
     lessee_signature: null,
     issued_at: new Date(),
     created_by: userId || null,
@@ -484,16 +650,14 @@ async function renderContractPreviewPdf(rentalId, userId) {
 }
 
 /**
- * Generates a signed rental contract PDF from the lessee digital signature
- * (PNG/JPEG data URL captured by the signature pad) and registers it.
+ * Step A: generates the original draft PDF, hashes it and persists it in R2.
+ * The draft is never deleted — it is the primary technical evidence of the
+ * exact content presented to the customer before signing.
  *
- * @returns {{ contractId: string }}
+ * @returns {{ contract: object, documentHash: string, draftPdfPath: string,
+ *   draftPdfUrl: string|null }}
  */
-exports.issueContract = async (rentalId, userId, lesseeSignature) => {
-  if (!signatureToBuffer(lesseeSignature)) {
-    throw new Error('INVALID_SIGNATURE');
-  }
-
+exports.generateContractDraft = async (rentalId, userId) => {
   const rental = await RentalModel.findById(rentalId);
   if (!rental) {
     throw new Error('RENTAL_NOT_FOUND');
@@ -502,33 +666,221 @@ exports.issueContract = async (rentalId, userId, lesseeSignature) => {
     throw new Error('RENTAL_CANCELLED');
   }
 
+  const contractId = uuidv4();
   const issuedAt = new Date();
-  const contract = await ContractModel.create({
-    rentalId,
-    customerId: rental.customer_id,
-    lesseeSignature,
-    issuedAt,
-    createdBy: userId,
-  });
+  const baseContract = {
+    id: contractId,
+    rental_id: rentalId,
+    customer_id: rental.customer_id,
+    contract_number: null,
+    lessee_signature: null,
+    issued_at: issuedAt,
+    created_by: userId || null,
+  };
 
-  const data = await loadContractData(contract, userId);
-  const { unsignedPath, signedPath } = await renderSignedPdf(
-    { ...contract, issued_at: issuedAt },
-    data,
-  );
-  await safeUnlink(unsignedPath);
-  await safeUnlink(signedPath);
+  // Load the rental/customer/store data before opening the transaction to keep
+  // the FOR UPDATE lock window as short as possible.
+  const data = await loadContractData(baseContract, userId);
+  const prefix = resolveContractPrefix(data.store);
+  const contractYear = issuedAt.getFullYear();
 
-  return { contractId: contract.id };
+  let lastError;
+  for (let attempt = 1; attempt <= CONTRACT_NUMBER_MAX_ATTEMPTS; attempt += 1) {
+    const connection = await db.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      const contractNumber = await ContractModel.generateContractNumber({
+        prefix,
+        year: contractYear,
+        connection,
+      });
+      const draftContract = { ...baseContract, contract_number: contractNumber };
+
+      // Insert the row before uploading so a concurrent duplicate number fails
+      // here (unique index), never after an orphan PDF has been sent to R2.
+      await ContractModel.create(
+        {
+          id: contractId,
+          rentalId,
+          customerId: rental.customer_id,
+          contractNumber,
+          lesseeSignature: null,
+          issuedAt,
+          createdBy: userId,
+          status: 'draft',
+          documentHash: '0'.repeat(64),
+        },
+        connection,
+      );
+
+      const draftBuffer = await renderContractPdfBuffer(draftContract, data);
+      const documentHash = sha256(draftBuffer);
+      const draftPdfPath = await uploadBuffer(
+        draftBuffer,
+        buildContractPdfKey(rentalId, contractId, 'draft.pdf'),
+        'application/pdf',
+      );
+
+      const contract = await ContractModel.updateDraft(
+        contractId,
+        { documentHash, draftPdfPath, status: 'pending_signature' },
+        connection,
+      );
+
+      await connection.commit();
+
+      return {
+        contract: contract || (await ContractModel.findById(contractId)),
+        contractNumber,
+        documentHash,
+        draftPdfPath,
+        draftPdfUrl: getPublicUrl(draftPdfPath),
+      };
+    } catch (error) {
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        console.error('Error rolling back contract transaction:', rollbackError.message);
+      }
+
+      lastError = error;
+      if (TRANSIENT_DB_ERRORS.has(error.code) && attempt < CONTRACT_NUMBER_MAX_ATTEMPTS) {
+        await sleep(25 * attempt);
+        continue;
+      }
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  throw lastError;
 };
 
 /**
- * Re-renders the signed contract PDF on demand and returns it as a Buffer.
+ * Step B: loads the original draft from R2, overlays the lessee signature on
+ * its last page, persists the definitive PDF in R2 and records the audit trail.
+ *
+ * @returns {{ contract: object, signedPdfPath: string, signedPdfUrl: string|null }}
+ */
+exports.signContract = async (contractId, lesseeSignature, metadata = {}) => {
+  if (!signatureToBuffer(lesseeSignature)) {
+    throw new Error('INVALID_SIGNATURE');
+  }
+
+  const contract = await ContractModel.findById(contractId);
+  if (!contract) {
+    throw new Error('CONTRACT_NOT_FOUND');
+  }
+  if (contract.status === 'signed' || contract.signed_pdf_path) {
+    throw new Error('CONTRACT_ALREADY_SIGNED');
+  }
+  if (!contract.draft_pdf_path) {
+    throw new Error('DRAFT_NOT_FOUND');
+  }
+
+  const rental = await RentalModel.findById(contract.rental_id);
+  if (!rental) {
+    throw new Error('RENTAL_NOT_FOUND');
+  }
+  if (rental.status === 'cancelled') {
+    throw new Error('RENTAL_CANCELLED');
+  }
+
+  const draftKey = extractKey(contract.draft_pdf_path);
+  if (!draftKey) {
+    throw new Error('DRAFT_NOT_FOUND');
+  }
+
+  const draftBuffer = await downloadFile(draftKey);
+  if (contract.document_hash && sha256(draftBuffer) !== contract.document_hash) {
+    throw new Error('DRAFT_HASH_MISMATCH');
+  }
+
+  const signedAt = metadata.signedAt ? new Date(metadata.signedAt) : new Date();
+  const signedBuffer = await embedLesseeSignature(draftBuffer, lesseeSignature, {
+    contractId,
+    documentHash: contract.document_hash,
+    signedAt,
+  });
+
+  const signedPdfPath = await uploadBuffer(
+    signedBuffer,
+    buildContractPdfKey(contract.rental_id, contract.id, 'signed.pdf'),
+    'application/pdf',
+  );
+
+  await ContractModel.markSigned(contractId, {
+    lesseeSignature,
+    signedAt,
+    signerIp: metadata.signerIp || null,
+    deviceUserAgent: metadata.deviceUserAgent || null,
+    signedPdfPath,
+  });
+
+  const signedContract = await ContractModel.findById(contractId);
+
+  return {
+    contract: signedContract,
+    signedPdfPath,
+    signedPdfUrl: getPublicUrl(signedPdfPath),
+  };
+};
+
+/**
+ * Cancels a contract, keeping its PDFs/hash as audit evidence and recording
+ * the reason in notes. The rental can then receive a new contract.
+ */
+exports.cancelContract = async (contractId, notes) => {
+  const contract = await ContractModel.findById(contractId);
+  if (!contract) {
+    throw new Error('CONTRACT_NOT_FOUND');
+  }
+  if (contract.status === 'cancelled') {
+    throw new Error('CONTRACT_ALREADY_CANCELLED');
+  }
+
+  return ContractModel.cancel(contractId, notes);
+};
+
+/**
+ * Backwards-compatible one-call flow: generates the draft and immediately
+ * signs it. Both PDFs remain persisted in R2.
+ *
+ * @returns {{ contractId: string }}
+ */
+exports.issueContract = async (rentalId, userId, lesseeSignature, metadata = {}) => {
+  const { contract } = await exports.generateContractDraft(rentalId, userId);
+  const { contract: signedContract } = await exports.signContract(contract.id, lesseeSignature, {
+    ...metadata,
+    userId,
+  });
+
+  return {
+    contractId: signedContract.id,
+    contractNumber: signedContract.contract_number,
+    documentHash: signedContract.document_hash,
+    signedPdfPath: signedContract.signed_pdf_path,
+  };
+};
+
+/**
+ * Returns the definitive signed PDF. New contracts are downloaded from R2;
+ * legacy contracts are re-rendered from the stored signature.
  */
 exports.getContractPdfBuffer = async (contractId) => {
   const contract = await ContractModel.findById(contractId);
   if (!contract) {
     throw new Error('CONTRACT_NOT_FOUND');
+  }
+
+  if (contract.signed_pdf_path) {
+    const key = extractKey(contract.signed_pdf_path);
+    if (!key) {
+      throw new Error('SIGNED_PDF_NOT_FOUND');
+    }
+    return downloadFile(key);
   }
 
   const data = await loadContractData(contract, contract.created_by);
@@ -555,20 +907,18 @@ exports.sendContractEmail = async (contractId, email, userId) => {
   }
 
   const data = await loadContractData(contract, userId || contract.created_by);
-  const { unsignedPath, signedPath } = await renderSignedPdf(contract, data);
+  const { filePath, cleanup } = await materializeSignedPdf(contract, data);
 
   let deliveryStatus = 'failed';
   try {
     const sent = await emailService.sendEmail({
       to: email,
       subject: `Contrato de Prestação de Serviços e Locação de Trajes a Rigor - ${data.store?.name || 'Madri Noivas'}`,
-      text: `Olá, ${data.customer?.name || 'cliente'}! Segue em anexo o seu Contrato de Prestação de Serviços e Locação de Trajes a Rigor (Contrato Nº ${contract.id
-        .slice(0, 8)
-        .toUpperCase()}).`,
+      text: `Olá, ${data.customer?.name || 'cliente'}! Segue em anexo o seu Contrato de Prestação de Serviços e Locação de Trajes a Rigor (Contrato Nº ${getContractNumberLabel(contract)}).`,
       attachments: [
         {
-          filename: `contrato_${contract.id.slice(0, 8)}.pdf`,
-          path: signedPath,
+          filename: buildContractFileName(contract),
+          path: filePath,
         },
       ],
     });
@@ -577,8 +927,7 @@ exports.sendContractEmail = async (contractId, email, userId) => {
     console.error('Error sending contract %s via email:', contractId, error);
   } finally {
     await ContractModel.updateDeliveryStatus(contractId, 'email', deliveryStatus);
-    await safeUnlink(unsignedPath);
-    await safeUnlink(signedPath);
+    await cleanup();
   }
 
   return { deliveryStatus };
@@ -597,26 +946,53 @@ exports.sendContractWhatsApp = async (contractId, phone, userId) => {
   }
 
   const data = await loadContractData(contract, userId || contract.created_by);
-  const { unsignedPath, signedPath } = await renderSignedPdf(contract, data);
+  const { filePath, cleanup } = await materializeSignedPdf(contract, data);
 
   let deliveryStatus = 'failed';
   try {
     const sent = await whatsappService.sendDocument({
       to: phone,
-      filePath: signedPath,
-      fileName: `contrato_${contract.id.slice(0, 8)}.pdf`,
-      caption: `Contrato de Prestação de Serviços e Locação de Trajes a Rigor - ${data.store?.name || 'Madri Noivas'}`,
+      filePath,
+      fileName: buildContractFileName(contract),
+      caption: `Contrato de Prestação de Serviços e Locação de Trajes a Rigor - ${data.store?.name || 'Madri Noivas'} (Contrato Nº ${getContractNumberLabel(contract)})`,
     });
     deliveryStatus = sent ? 'sent' : 'failed';
   } catch (error) {
     console.error('Error sending contract %s via WhatsApp:', contractId, error);
   } finally {
     await ContractModel.updateDeliveryStatus(contractId, 'whatsapp', deliveryStatus);
-    await safeUnlink(unsignedPath);
-    await safeUnlink(signedPath);
+    await cleanup();
   }
 
   return { deliveryStatus };
+};
+
+/**
+ * Sends the definitive signed contract to every contact available for the
+ * customer (WhatsApp and e-mail). Used automatically after signing; failures
+ * are recorded per channel and never break the signing flow.
+ */
+exports.dispatchSignedContract = async (contractId, userId) => {
+  const contract = await ContractModel.findById(contractId);
+  if (!contract) {
+    throw new Error('CONTRACT_NOT_FOUND');
+  }
+
+  const customer = await CustomerModel.findById(contract.customer_id);
+  const email = getCustomerEmail(customer);
+  const phone = getCustomerPhone(customer);
+  const result = { email: null, whatsapp: null };
+
+  if (email) {
+    const { deliveryStatus } = await exports.sendContractEmail(contractId, email, userId);
+    result.email = deliveryStatus;
+  }
+  if (phone) {
+    const { deliveryStatus } = await exports.sendContractWhatsApp(contractId, phone, userId);
+    result.whatsapp = deliveryStatus;
+  }
+
+  return result;
 };
 
 /**

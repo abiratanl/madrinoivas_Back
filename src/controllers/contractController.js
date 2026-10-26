@@ -3,6 +3,195 @@ const ContractModel = require('../models/ContractModel');
 const contractService = require('../services/contractService');
 
 /**
+ * Captures the signing audit metadata from the tablet request.
+ */
+function getAuditMetadata(req) {
+  return {
+    signerIp: req.ip,
+    deviceUserAgent: req.headers['user-agent'] || null,
+    signedAt: new Date(),
+  };
+}
+
+/**
+ * After signing, deliver the definitive PDF to the customer's WhatsApp/e-mail
+ * contacts without blocking the HTTP response. Disabled in tests.
+ */
+function triggerAutomaticDelivery(contractId, userId) {
+  if (
+    process.env.NODE_ENV === 'test' ||
+    process.env.CONTRACT_AUTO_DELIVERY === 'false' ||
+    typeof contractService.dispatchSignedContract !== 'function'
+  ) {
+    return;
+  }
+
+  contractService.dispatchSignedContract(contractId, userId).catch((error) => {
+    console.error('Error dispatching signed contract %s:', contractId, error);
+  });
+}
+
+/**
+ * POST /api/contracts/generate
+ * Generates and persists the original draft PDF in R2 (Step A).
+ */
+exports.generateContractDraft = async (req, res) => {
+  try {
+    const rentalId = req.body?.rental_id || req.body?.rentalId || req.body?.id;
+    if (!rentalId) {
+      return res.status(400).json({ message: 'O aluguel é obrigatório.' });
+    }
+
+    const { contract, contractNumber, documentHash, draftPdfPath, draftPdfUrl } =
+      await contractService.generateContractDraft(rentalId, req.user.id);
+
+    res.status(201).json({
+      status: 'success',
+      message: 'Contrato gerado e aguardando assinatura.',
+      data: {
+        id: contract.id,
+        rental_id: contract.rental_id,
+        customer_id: contract.customer_id,
+        contract_number: contract.contract_number || contractNumber,
+        status: contract.status,
+        document_hash: documentHash,
+        draft_pdf_path: draftPdfPath,
+        draft_pdf_url: draftPdfUrl,
+        issued_at: contract.issued_at,
+      },
+    });
+  } catch (error) {
+    if (error.message === 'RENTAL_NOT_FOUND') {
+      return res.status(404).json({ message: 'Aluguel não encontrado.' });
+    }
+    if (error.message === 'RENTAL_CANCELLED') {
+      return res
+        .status(422)
+        .json({ message: 'Não é possível gerar contrato de um aluguel cancelado.' });
+    }
+    console.error('Error generating contract draft:', error);
+    res.status(500).json({ status: 'error', message: 'Erro ao gerar contrato.' });
+  }
+};
+
+/**
+ * POST /api/contracts/:id/sign
+ * Overlays the tablet signature on the draft, persists the definitive PDF in
+ * R2 and records the audit metadata (Step B).
+ */
+exports.signContract = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { lessee_signature } = req.body || {};
+
+    if (!lessee_signature) {
+      return res.status(400).json({ message: 'A assinatura da locatária é obrigatória.' });
+    }
+
+    const metadata = getAuditMetadata(req);
+    let result;
+    try {
+      result = await contractService.signContract(id, lessee_signature, metadata);
+    } catch (error) {
+      if (error.message === 'INVALID_SIGNATURE') {
+        return res
+          .status(400)
+          .json({ message: 'Assinatura inválida. Capture a assinatura novamente.' });
+      }
+      if (error.message === 'CONTRACT_NOT_FOUND') {
+        return res.status(404).json({ message: 'Contrato não encontrado.' });
+      }
+      if (error.message === 'CONTRACT_ALREADY_SIGNED') {
+        return res.status(409).json({ message: 'Este contrato já foi assinado.' });
+      }
+      if (error.message === 'DRAFT_NOT_FOUND' || error.message === 'DRAFT_HASH_MISMATCH') {
+        return res.status(409).json({
+          message: 'O PDF original não está disponível ou falhou na verificação de integridade.',
+        });
+      }
+      if (error.message === 'RENTAL_CANCELLED') {
+        return res
+          .status(422)
+          .json({ message: 'Não é possível assinar o contrato de um aluguel cancelado.' });
+      }
+      throw error;
+    }
+
+    triggerAutomaticDelivery(id, req.user.id);
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Contrato assinado com sucesso.',
+      data: {
+        id: result.contract.id,
+        contract_number: result.contract.contract_number,
+        status: result.contract.status,
+        document_hash: result.contract.document_hash,
+        signed_at: result.contract.signed_at,
+        signer_ip: result.contract.signer_ip,
+        device_user_agent: result.contract.device_user_agent,
+        draft_pdf_path: result.contract.draft_pdf_path,
+        signed_pdf_path: result.signedPdfPath,
+        signed_pdf_url: result.signedPdfUrl,
+        pdf_url: `/api/contracts/${result.contract.id}/pdf`,
+      },
+    });
+  } catch (error) {
+    console.error('Error signing contract:', error);
+    res.status(500).json({ status: 'error', message: 'Erro ao assinar contrato.' });
+  }
+};
+
+/**
+ * POST /api/contracts/:id/cancel
+ * Cancels a contract (admin, owner or local_manager only), records the reason
+ * in notes and keeps the PDFs/hash as audit evidence.
+ */
+exports.cancelContract = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const rawNotes = req.body?.notes ?? req.body?.reason;
+    const notes = typeof rawNotes === 'string' ? rawNotes.trim() : '';
+
+    if (!notes) {
+      return res.status(400).json({ message: 'Informe o motivo do cancelamento.' });
+    }
+    if (notes.length > 2000) {
+      return res
+        .status(400)
+        .json({ message: 'O motivo do cancelamento deve ter no máximo 2000 caracteres.' });
+    }
+
+    let contract;
+    try {
+      contract = await contractService.cancelContract(id, notes);
+    } catch (error) {
+      if (error.message === 'CONTRACT_NOT_FOUND') {
+        return res.status(404).json({ message: 'Contrato não encontrado.' });
+      }
+      if (error.message === 'CONTRACT_ALREADY_CANCELLED') {
+        return res.status(409).json({ message: 'Este contrato já está cancelado.' });
+      }
+      throw error;
+    }
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Contrato cancelado com sucesso.',
+      data: {
+        id: contract.id,
+        contract_number: contract.contract_number,
+        status: contract.status,
+        notes: contract.notes,
+      },
+    });
+  } catch (error) {
+    console.error('Error cancelling contract:', error);
+    res.status(500).json({ status: 'error', message: 'Erro ao cancelar contrato.' });
+  }
+};
+
+/**
  * POST /api/rentals/:id/contract
  * Generates a signed rental contract PDF from the lessee digital signature
  * (data URL) and registers it. Returns the contract id and the PDF URL.
@@ -27,8 +216,14 @@ exports.generateContract = async (req, res) => {
     }
 
     let contractId;
+    let contractNumber;
     try {
-      ({ contractId } = await contractService.issueContract(id, req.user.id, lessee_signature));
+      ({ contractId, contractNumber } = await contractService.issueContract(
+        id,
+        req.user.id,
+        lessee_signature,
+        getAuditMetadata(req),
+      ));
     } catch (error) {
       if (error.message === 'INVALID_SIGNATURE') {
         return res
@@ -38,10 +233,16 @@ exports.generateContract = async (req, res) => {
       throw error;
     }
 
+    triggerAutomaticDelivery(contractId, req.user.id);
+
     res.status(201).json({
       status: 'success',
       message: 'Contrato gerado com sucesso.',
-      data: { id: contractId, pdf_url: `/api/contracts/${contractId}/pdf` },
+      data: {
+        id: contractId,
+        contract_number: contractNumber,
+        pdf_url: `/api/contracts/${contractId}/pdf`,
+      },
     });
   } catch (error) {
     console.error('Error generating contract:', error);
@@ -62,17 +263,29 @@ exports.getContractByRental = async (req, res) => {
       return res.status(404).json({ message: 'Nenhum contrato gerado para este aluguel.' });
     }
 
-    const contract = contracts[0];
+    const signedContract =
+      contracts.find((item) => item.status === 'signed') ||
+      contracts.find((item) => !item.status) ||
+      null;
+
+    if (!signedContract) {
+      return res.status(404).json({ message: 'Nenhum contrato assinado para este aluguel.' });
+    }
+
     res.status(200).json({
       status: 'success',
       data: {
-        id: contract.id,
-        rental_id: contract.rental_id,
-        customer_id: contract.customer_id,
-        issued_at: contract.issued_at,
-        whatsapp_delivery_status: contract.whatsapp_delivery_status,
-        email_delivery_status: contract.email_delivery_status,
-        pdf_url: `/api/contracts/${contract.id}/pdf`,
+        id: signedContract.id,
+        rental_id: signedContract.rental_id,
+        customer_id: signedContract.customer_id,
+        contract_number: signedContract.contract_number || null,
+        status: signedContract.status || 'signed',
+        issued_at: signedContract.issued_at,
+        signed_at: signedContract.signed_at || null,
+        document_hash: signedContract.document_hash || null,
+        whatsapp_delivery_status: signedContract.whatsapp_delivery_status,
+        email_delivery_status: signedContract.email_delivery_status,
+        pdf_url: `/api/contracts/${signedContract.id}/pdf`,
       },
     });
   } catch (error) {
