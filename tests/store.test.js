@@ -2,6 +2,15 @@ const request = require('supertest');
 const app = require('../src/app');
 const StoreModel = require('../src/models/StoreModel');
 
+jest.mock('../src/services/uploadService', () => ({
+  uploadBuffer: jest.fn(),
+  getPublicUrl: jest.fn((key) => (key ? `https://cdn.test/${key}` : null)),
+  extractKey: jest.fn((value) => value),
+  deleteFile: jest.fn(),
+}));
+
+const { uploadBuffer } = require('../src/services/uploadService');
+
 // =================================================================
 // 1. MOCKS
 // =================================================================
@@ -135,6 +144,46 @@ describe('Store Management API', () => {
         contacts: [expect.objectContaining({ type: 'email', value: 'loja@madri.com' })],
       }),
     );
+  });
+
+  it('PUT /api/stores/:id › Should upload the signature to R2 and store only its path', async () => {
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64',
+    );
+
+    StoreModel.findById
+      .mockResolvedValueOnce({ id: 'store-1', owner_signature: null })
+      .mockResolvedValueOnce({
+        id: 'store-1',
+        owner_signature: 'stores/signatures/test.png',
+      });
+    StoreModel.update.mockResolvedValue(true);
+    uploadBuffer.mockResolvedValue('stores/signatures/test.png');
+
+    const res = await request(app)
+      .put('/api/stores/store-1')
+      .field('name', 'Loja com assinatura')
+      .field(
+        'addresses',
+        JSON.stringify([{ street: 'Rua A', city: 'Taubaté', state: 'SP', zip_code: '12000-000' }]),
+      )
+      .attach('owner_signature', png, { filename: 'assinatura.png', contentType: 'image/png' });
+
+    expect(res.statusCode).toBe(200);
+    expect(uploadBuffer).toHaveBeenCalledWith(
+      expect.any(Buffer),
+      expect.stringMatching(/^stores\/signatures\/.+\.png$/),
+      'image/png',
+    );
+    expect(StoreModel.update).toHaveBeenCalledWith(
+      'store-1',
+      expect.objectContaining({
+        owner_signature: 'stores/signatures/test.png',
+        addresses: expect.any(Array),
+      }),
+    );
+    expect(res.body.data.owner_signature_url).toBe('https://cdn.test/stores/signatures/test.png');
   });
 
   it('PUT /api/stores/:id › Should return 404 when the store does not exist', async () => {

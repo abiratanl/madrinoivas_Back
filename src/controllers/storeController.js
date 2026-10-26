@@ -1,9 +1,24 @@
 const Store = require('../models/StoreModel');
+const { getPublicUrl, extractKey, deleteFile } = require('../services/uploadService');
 
 // Must match the `type` ENUM of the contacts table
 const ALLOWED_CONTACT_TYPES = ['mobile', 'whatsapp', 'landline', 'email', 'instagram', 'facebook'];
 const CNPJ_REGEX = /^\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}$/;
 const CPF_REGEX = /^\d{3}\.?\d{3}\.?\d{3}-?\d{2}$/;
+
+const toPublicSignatureUrl = (value) => {
+  if (!value) return null;
+  if (/^(https?:|data:)/i.test(value)) return value;
+  return getPublicUrl(value);
+};
+
+const withSignatureUrl = (store) => {
+  if (!store) return store;
+  return {
+    ...store,
+    owner_signature_url: toPublicSignatureUrl(store.owner_signature),
+  };
+};
 
 const normalizeOptionalString = (value) => {
   if (value === undefined) return undefined;
@@ -71,7 +86,7 @@ const buildStoreData = (body) => {
   const ownerCpf = normalizeOptionalString(body.owner_cpf);
   if (ownerCpf !== undefined) data.owner_cpf = ownerCpf;
 
-  // Owner signature is a data URL; keep it as-is (no trimming)
+  // Owner signature is the R2 object key (path) or a legacy data URL
   if (body.owner_signature !== undefined) data.owner_signature = body.owner_signature || null;
 
   if (body.is_active !== undefined) data.is_active = body.is_active ? 1 : 0;
@@ -99,7 +114,7 @@ exports.getAllStores = async (req, res) => {
     res.status(200).json({
       status: 'success',
       results: stores.length,
-      data: stores,
+      data: stores.map(withSignatureUrl),
     });
   } catch (error) {
     console.error('Erro ao buscar lojas:', error);
@@ -121,7 +136,7 @@ exports.getStoreById = async (req, res) => {
 
     res.status(200).json({
       status: 'success',
-      data: store,
+      data: withSignatureUrl(store),
     });
   } catch (error) {
     console.error('Erro no Controller:', error);
@@ -134,7 +149,8 @@ exports.getStoreById = async (req, res) => {
 
 exports.createStore = async (req, res) => {
   try {
-    const errors = validateStorePayload(req.body);
+    const body = req.body || {};
+    const errors = validateStorePayload(body);
     if (errors.length > 0) {
       return res.status(400).json({
         status: 'fail',
@@ -142,12 +158,12 @@ exports.createStore = async (req, res) => {
       });
     }
 
-    const store = await Store.create(buildStoreData(req.body));
+    const store = await Store.create(buildStoreData(body));
 
     res.status(201).json({
       status: 'success',
       message: 'Loja criada com sucesso.',
-      data: store,
+      data: withSignatureUrl(store),
     });
   } catch (error) {
     console.error('Erro ao criar loja:', error);
@@ -158,8 +174,9 @@ exports.createStore = async (req, res) => {
 exports.updateStore = async (req, res) => {
   try {
     const { id } = req.params;
+    const body = req.body || {};
 
-    const errors = validateStorePayload(req.body, { partial: true });
+    const errors = validateStorePayload(body, { partial: true });
     if (errors.length > 0) {
       return res.status(400).json({
         status: 'fail',
@@ -167,7 +184,8 @@ exports.updateStore = async (req, res) => {
       });
     }
 
-    const updated = await Store.update(id, buildStoreData(req.body));
+    const existingStore = await Store.findById(id);
+    const updated = await Store.update(id, buildStoreData(body));
 
     if (!updated) {
       return res.status(404).json({
@@ -177,9 +195,17 @@ exports.updateStore = async (req, res) => {
     }
 
     const updatedStore = await Store.findById(id);
-    res
-      .status(200)
-      .json({ status: 'success', message: 'Loja atualizada com sucesso', data: updatedStore });
+
+    if (existingStore && existingStore.owner_signature !== updatedStore?.owner_signature) {
+      const oldKey = extractKey(existingStore.owner_signature);
+      if (oldKey) await deleteFile(oldKey);
+    }
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Loja atualizada com sucesso',
+      data: withSignatureUrl(updatedStore),
+    });
   } catch (error) {
     console.error('Erro ao atualizar loja:', error);
     res.status(500).json({ status: 'error', message: 'Erro interno ao atualizar loja.' });
@@ -203,7 +229,7 @@ exports.toggleStoreActive = async (req, res) => {
     res.status(200).json({
       status: 'success',
       message: `Loja ${updatedStore.is_active ? 'ativada' : 'inativada'} com sucesso`,
-      data: updatedStore,
+      data: withSignatureUrl(updatedStore),
     });
   } catch (error) {
     console.error('Erro ao alternar status da loja:', error);
