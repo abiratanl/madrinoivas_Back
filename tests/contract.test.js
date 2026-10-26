@@ -111,6 +111,36 @@ describe('Rental Contracts API', () => {
     expect(res.body.message).toMatch(/erro ao gerar contrato/i);
   });
 
+  // --- GET CONTRACT BY RENTAL (GET /api/rentals/:id/contract) ---
+
+  it('GET /api/rentals/:id/contract › Should return the latest signed contract', async () => {
+    ContractModel.findByRentalId.mockResolvedValue([
+      {
+        id: 'contract-1',
+        rental_id: 'rental-1',
+        customer_id: 'customer-1',
+        issued_at: '2026-10-26T10:00:00.000Z',
+        whatsapp_delivery_status: 'sent',
+        email_delivery_status: 'pending',
+      },
+    ]);
+
+    const res = await request(app).get('/api/rentals/rental-1/contract');
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.data.id).toBe('contract-1');
+    expect(res.body.data.rental_id).toBe('rental-1');
+    expect(res.body.data.pdf_url).toBe('/api/contracts/contract-1/pdf');
+  });
+
+  it('GET /api/rentals/:id/contract › Should FAIL if rental has no contracts', async () => {
+    ContractModel.findByRentalId.mockResolvedValue([]);
+
+    const res = await request(app).get('/api/rentals/rental-1/contract');
+
+    expect(res.statusCode).toBe(404);
+  });
+
   // --- DOWNLOAD PDF (GET /api/contracts/:id/pdf) ---
 
   it('GET /api/contracts/:id/pdf › Should return the signed PDF', async () => {
@@ -203,6 +233,130 @@ describe('Rental Contracts API', () => {
       .send({ email: 'cliente@email.com' });
 
     expect(res.statusCode).toBe(502);
+    expect(res.body.data.emailDeliveryStatus).toBe('failed');
+  });
+
+  // --- SEND CONTRACT PREVIEW WHATSAPP (POST /api/rentals/:id/contract/send-whatsapp) ---
+
+  it('POST /api/rentals/:id/contract/send-whatsapp › Should send the contract preview via WhatsApp', async () => {
+    RentalModel.findById.mockResolvedValue({ id: 'rental-1', status: 'reserved' });
+    contractService.sendContractPreviewWhatsApp.mockResolvedValue({ deliveryStatus: 'sent' });
+
+    const res = await request(app)
+      .post('/api/rentals/rental-1/contract/send-whatsapp')
+      .send({ phone: '12999998888' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.data.whatsappDeliveryStatus).toBe('sent');
+    expect(contractService.sendContractPreviewWhatsApp).toHaveBeenCalledWith(
+      'rental-1',
+      '12999998888',
+      'user-caixa',
+    );
+  });
+
+  it('POST /api/rentals/:id/contract/send-whatsapp › Should FAIL without a phone', async () => {
+    const res = await request(app).post('/api/rentals/rental-1/contract/send-whatsapp').send({});
+
+    expect(res.statusCode).toBe(400);
+    expect(contractService.sendContractPreviewWhatsApp).not.toHaveBeenCalled();
+  });
+
+  it('POST /api/rentals/:id/contract/send-whatsapp › Should FAIL if rental does not exist', async () => {
+    RentalModel.findById.mockResolvedValue(null);
+
+    const res = await request(app)
+      .post('/api/rentals/rental-fantasma/contract/send-whatsapp')
+      .send({ phone: '12999998888' });
+
+    expect(res.statusCode).toBe(404);
+    expect(contractService.sendContractPreviewWhatsApp).not.toHaveBeenCalled();
+  });
+
+  it('POST /api/rentals/:id/contract/send-whatsapp › Should report failed delivery', async () => {
+    RentalModel.findById.mockResolvedValue({ id: 'rental-1', status: 'reserved' });
+    contractService.sendContractPreviewWhatsApp.mockResolvedValue({ deliveryStatus: 'failed' });
+
+    const res = await request(app)
+      .post('/api/rentals/rental-1/contract/send-whatsapp')
+      .send({ phone: '12999998888' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.status).toBe('error');
+    expect(res.body.data.whatsappDeliveryStatus).toBe('failed');
+  });
+
+  // --- CONTRACT PREVIEW PDF (GET /api/rentals/:id/contract/preview/pdf) ---
+
+  it('GET /api/rentals/:id/contract/preview/pdf › Should return the unsigned preview PDF', async () => {
+    contractService.getContractPreviewPdfBuffer.mockResolvedValue(Buffer.from('%PDF-preview'));
+
+    const res = await request(app).get('/api/rentals/rental-1/contract/preview/pdf');
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toMatch(/application\/pdf/);
+    expect(res.headers['content-disposition']).toMatch(/previa_contrato_rental-1/);
+    expect(contractService.getContractPreviewPdfBuffer).toHaveBeenCalledWith(
+      'rental-1',
+      'user-caixa',
+    );
+  });
+
+  it('GET /api/rentals/:id/contract/preview/pdf › Should FAIL if rental does not exist', async () => {
+    contractService.getContractPreviewPdfBuffer.mockRejectedValue(new Error('RENTAL_NOT_FOUND'));
+
+    const res = await request(app).get('/api/rentals/rental-fantasma/contract/preview/pdf');
+
+    expect(res.statusCode).toBe(404);
+  });
+
+  // --- SEND PREVIEW EMAIL (POST /api/rentals/:id/contract/send-email) ---
+
+  it('POST /api/rentals/:id/contract/send-email › Should send the contract preview by email', async () => {
+    RentalModel.findById.mockResolvedValue({ id: 'rental-1', status: 'reserved' });
+    contractService.sendContractPreviewEmail.mockResolvedValue({ deliveryStatus: 'sent' });
+
+    const res = await request(app)
+      .post('/api/rentals/rental-1/contract/send-email')
+      .send({ email: 'cliente@example.com' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.data.emailDeliveryStatus).toBe('sent');
+    expect(contractService.sendContractPreviewEmail).toHaveBeenCalledWith(
+      'rental-1',
+      'cliente@example.com',
+      'user-caixa',
+    );
+  });
+
+  it('POST /api/rentals/:id/contract/send-email › Should FAIL without an email', async () => {
+    const res = await request(app).post('/api/rentals/rental-1/contract/send-email').send({});
+
+    expect(res.statusCode).toBe(400);
+    expect(contractService.sendContractPreviewEmail).not.toHaveBeenCalled();
+  });
+
+  it('POST /api/rentals/:id/contract/send-email › Should FAIL if rental does not exist', async () => {
+    RentalModel.findById.mockResolvedValue(null);
+
+    const res = await request(app)
+      .post('/api/rentals/rental-fantasma/contract/send-email')
+      .send({ email: 'cliente@example.com' });
+
+    expect(res.statusCode).toBe(404);
+    expect(contractService.sendContractPreviewEmail).not.toHaveBeenCalled();
+  });
+
+  it('POST /api/rentals/:id/contract/send-email › Should report failed delivery', async () => {
+    RentalModel.findById.mockResolvedValue({ id: 'rental-1', status: 'reserved' });
+    contractService.sendContractPreviewEmail.mockResolvedValue({ deliveryStatus: 'failed' });
+
+    const res = await request(app)
+      .post('/api/rentals/rental-1/contract/send-email')
+      .send({ email: 'cliente@example.com' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.status).toBe('error');
     expect(res.body.data.emailDeliveryStatus).toBe('failed');
   });
 

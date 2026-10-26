@@ -154,7 +154,7 @@ describe('Payment Receipts API', () => {
 // 3. UNIT TEST — MockPdfSignerService
 // =================================================================
 describe('MockPdfSignerService', () => {
-  it('sign › Should stamp the input PDF and write a different output file', async () => {
+  it('sign › Should copy the input PDF to the output file without a watermark', async () => {
     const PDFDocument = require('pdfkit');
     const MockPdfSignerService = require('../src/services/signing/MockPdfSignerService');
 
@@ -180,7 +180,7 @@ describe('MockPdfSignerService', () => {
       const outputBytes = fs.readFileSync(outputPath);
 
       expect(fs.existsSync(outputPath)).toBe(true);
-      expect(outputBytes.equals(inputBytes)).toBe(false);
+      expect(outputBytes.equals(inputBytes)).toBe(true);
       expect(outputBytes.length).toBeGreaterThan(0);
     } finally {
       for (const p of [inputPath, outputPath]) {

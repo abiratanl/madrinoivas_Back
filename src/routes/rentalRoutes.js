@@ -18,6 +18,10 @@ router.post('/:id/extend', rentalController.extendRental);
 router.post('/:id/return', rentalController.returnRental);
 router.post('/:id/cancel', rentalController.cancelRental);
 router.post('/:id/contract', contractController.generateContract);
+router.get('/:id/contract', contractController.getContractByRental);
+router.post('/:id/contract/send-email', contractController.sendContractPreviewEmail);
+router.post('/:id/contract/send-whatsapp', contractController.sendContractPreviewWhatsApp);
+router.get('/:id/contract/preview/pdf', contractController.getContractPreviewPdfByRental);
 router.get('/:id/contract/pdf', contractController.getContractPdfByRental);
 
 // Hard Delete - Apenas admin/owner e status cancelled

@@ -8,9 +8,8 @@
  * issuedBy, ...) that implementations may embed in the signature.
  *
  * Implementations:
- * - MockPdfSignerService: development/testing only. Stamps a visible
- *   "MOCK" watermark on the last page using pdf-lib. No cryptographic
- *   validity.
+ * - MockPdfSignerService: development/testing only. Leaves the PDF
+ *   unchanged. No cryptographic validity.
  * - A1PdfSignerService (future): real ICP-Brasil A1 certificate signing.
  *   Implement it with node-signpdf + a PKCS#12 (.pfx) certificate loaded
  *   from env vars (e.g. A1_CERT_PATH / A1_CERT_PASSWORD). It must keep this
