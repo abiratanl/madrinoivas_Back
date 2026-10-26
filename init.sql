@@ -417,20 +417,30 @@ CREATE TABLE IF NOT EXISTS `receipts` (
 
 -- =================================================================================
 -- 18. CONTRACTS
--- Rental contracts generated with the lessee digital signature. The signed PDF
--- is not persisted: it is re-rendered on demand from the stored signature.
+-- Rental contracts. Two PDFs are kept permanently in Cloudflare R2 for audit:
+-- the original draft (document_hash) and the final signed PDF.
 -- =================================================================================
 CREATE TABLE IF NOT EXISTS `contracts` (
   `id` char(36) NOT NULL,
   `rental_id` char(36) NOT NULL,
   `customer_id` char(36) NOT NULL,
-  `lessee_signature` mediumtext NOT NULL COMMENT 'Lessee signature as a PNG data URL',
+  `status` enum('draft','pending_signature','signed','cancelled') NOT NULL DEFAULT 'draft',
+  `contract_number` varchar(50) DEFAULT NULL COMMENT 'Sequential contract number (PREFIX-YYYY-0001)',
+  `lessee_signature` mediumtext NULL COMMENT 'Lessee signature as a PNG data URL',
+  `document_hash` varchar(64) NOT NULL COMMENT 'SHA-256 hash of the original draft PDF',
+  `signed_at` datetime DEFAULT NULL COMMENT 'Exact signature date/time (milliseconds)',
+  `signer_ip` varchar(45) DEFAULT NULL COMMENT 'IP address of the signing tablet',
+  `device_user_agent` text DEFAULT NULL COMMENT 'Tablet hardware/browser information',
+  `draft_pdf_path` varchar(255) DEFAULT NULL COMMENT 'R2 key of the original draft PDF',
+  `signed_pdf_path` varchar(255) DEFAULT NULL COMMENT 'R2 key of the final signed PDF',
+  `notes` text DEFAULT NULL COMMENT 'Cancellation reason / internal notes',
   `issued_at` datetime NOT NULL,
   `created_by` char(36) DEFAULT NULL,
   `whatsapp_delivery_status` enum('pending','sent','failed') NOT NULL DEFAULT 'pending',
   `email_delivery_status` enum('pending','sent','failed') NOT NULL DEFAULT 'pending',
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_contracts_contract_number` (`contract_number`),
   KEY `fk_contracts_rental` (`rental_id`),
   KEY `fk_contracts_customer` (`customer_id`),
   KEY `fk_contracts_created_by` (`created_by`),
