@@ -1038,6 +1038,22 @@ const swaggerDocument = {
     // RENTAL CONTRACTS
     // ==========================================
     '/api/rentals/{id}/contract': {
+      get: {
+        summary: 'Buscar o contrato assinado mais recente de um aluguel',
+        description:
+          'Retorna os metadados do contrato assinado mais recente do aluguel, incluindo o id usado para visualizar, imprimir e enviar o PDF assinado.',
+        tags: ['Contracts'],
+        parameters: [
+          { in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } },
+        ],
+        responses: {
+          200: {
+            description: 'Contrato encontrado. Retorna data.id, data.issued_at e data.pdf_url.',
+          },
+          404: { description: 'Nenhum contrato gerado para este aluguel.' },
+          500: { description: 'Erro ao buscar o contrato do aluguel.' },
+        },
+      },
       post: {
         summary: 'Gerar contrato de locação com assinatura digital da locatária',
         description:
@@ -1073,6 +1089,88 @@ const swaggerDocument = {
           404: { description: 'Aluguel não encontrado.' },
           422: { description: 'Aluguel cancelado — não é possível gerar contrato.' },
           500: { description: 'Erro ao gerar contrato.' },
+        },
+      },
+    },
+    '/api/rentals/{id}/contract/send-whatsapp': {
+      post: {
+        summary: 'Enviar a prévia do contrato (não assinado) via WhatsApp (PDF)',
+        description:
+          'Renderiza o PDF do contrato sem a assinatura da locatária e o envia ao cliente pelo WhatsApp, permitindo que ele leia o documento antes de assinar no tablet.',
+        tags: ['Contracts'],
+        parameters: [
+          { in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['phone'],
+                properties: { phone: { type: 'string', example: '12999998888' } },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'Retorna data.whatsappDeliveryStatus (sent|failed).',
+          },
+          400: { description: 'Telefone não informado.' },
+          404: { description: 'Aluguel não encontrado.' },
+          422: { description: 'Aluguel cancelado — não é possível enviar a prévia.' },
+          500: { description: 'Erro ao enviar a prévia do contrato.' },
+        },
+      },
+    },
+    '/api/rentals/{id}/contract/send-email': {
+      post: {
+        summary: 'Enviar a prévia do contrato (não assinado) por e-mail (PDF anexo)',
+        description:
+          'Renderiza o PDF do contrato sem a assinatura da locatária e o envia ao e-mail do cliente, permitindo que ele leia o documento antes de assinar no tablet.',
+        tags: ['Contracts'],
+        parameters: [
+          { in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['email'],
+                properties: { email: { type: 'string', format: 'email' } },
+              },
+            },
+          },
+        },
+        responses: {
+          200: { description: 'Retorna data.emailDeliveryStatus (sent|failed).' },
+          400: { description: 'E-mail não informado.' },
+          404: { description: 'Aluguel não encontrado.' },
+          422: { description: 'Aluguel cancelado — não é possível enviar a prévia.' },
+          500: { description: 'Erro ao enviar a prévia do contrato.' },
+        },
+      },
+    },
+    '/api/rentals/{id}/contract/preview/pdf': {
+      get: {
+        summary: 'Baixar o PDF da prévia do contrato (não assinado)',
+        description:
+          'Renderiza o PDF do contrato sem a assinatura da locatária para leitura antes da assinatura no tablet.',
+        tags: ['Contracts'],
+        parameters: [
+          { in: 'path', name: 'id', required: true, schema: { type: 'string', format: 'uuid' } },
+        ],
+        responses: {
+          200: {
+            description: 'PDF da prévia do contrato (application/pdf), inline.',
+            content: { 'application/pdf': { schema: { type: 'string', format: 'binary' } } },
+          },
+          404: { description: 'Aluguel não encontrado.' },
+          422: { description: 'Aluguel cancelado — não é possível gerar a prévia.' },
+          500: { description: 'Erro ao gerar a prévia do contrato.' },
         },
       },
     },

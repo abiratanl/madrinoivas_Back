@@ -322,23 +322,12 @@ function generateContractPdf(outputPath, data) {
       doc.addPage();
     }
 
-    const headingY = doc.y;
-    doc.font('Helvetica-Bold').fontSize(11).text('ASSINATURAS', { align: 'center' });
-    doc.y = headingY + 24;
-
-    const signatureTop = doc.y;
+    const signatureTop = doc.y + 24;
     const leftX = 60;
     const rightX = 305;
     const lineWidth = 220;
 
     const lessorSignatureBuffer = signatureToBuffer(store?.owner_signature);
-    doc
-      .font('Helvetica')
-      .fontSize(7.5)
-      .text('(Assinatura Digitalizada/Escaneada do Representante Legal)', leftX, signatureTop, {
-        width: lineWidth,
-        align: 'center',
-      });
     if (lessorSignatureBuffer) {
       doc.image(lessorSignatureBuffer, leftX + 50, signatureTop + 12, { width: 120 });
     }
@@ -365,13 +354,6 @@ function generateContractPdf(outputPath, data) {
     });
 
     const signatureBuffer = signatureToBuffer(contract.lessee_signature);
-    doc
-      .font('Helvetica')
-      .fontSize(7.5)
-      .text('(ASSINATURA NA TELA DO TABLET)', rightX, signatureTop, {
-        width: lineWidth,
-        align: 'center',
-      });
     if (signatureBuffer) {
       doc.image(signatureBuffer, rightX + 50, signatureTop + 12, { width: 120 });
     }
@@ -466,6 +448,39 @@ async function renderSignedPdf(contract, data) {
   });
 
   return { unsignedPath, signedPath };
+}
+
+/**
+ * Renders the unsigned contract preview for a rental into a temp PDF. The
+ * lessee signature area is left blank so the customer can read the document
+ * before signing it on the tablet.
+ *
+ * @returns {Promise<{ pdfPath: string, data: object }>} Temp PDF path and
+ * loaded entities used to render it
+ */
+async function renderContractPreviewPdf(rentalId, userId) {
+  const rental = await RentalModel.findById(rentalId);
+  if (!rental) {
+    throw new Error('RENTAL_NOT_FOUND');
+  }
+  if (rental.status === 'cancelled') {
+    throw new Error('RENTAL_CANCELLED');
+  }
+
+  const previewContract = {
+    id: rental.id,
+    rental_id: rental.id,
+    customer_id: rental.customer_id,
+    lessee_signature: null,
+    issued_at: new Date(),
+    created_by: userId || null,
+  };
+  const data = await loadContractData(previewContract, userId);
+  const outputPath = path.join(os.tmpdir(), `contrato_preview_${rental.id}.pdf`);
+
+  await generateContractPdf(outputPath, { contract: previewContract, ...data });
+
+  return { pdfPath: outputPath, data };
 }
 
 /**
@@ -599,6 +614,82 @@ exports.sendContractWhatsApp = async (contractId, phone, userId) => {
     await ContractModel.updateDeliveryStatus(contractId, 'whatsapp', deliveryStatus);
     await safeUnlink(unsignedPath);
     await safeUnlink(signedPath);
+  }
+
+  return { deliveryStatus };
+};
+
+/**
+ * Sends the unsigned contract preview PDF via WhatsApp so the customer can
+ * read the document on their own phone before signing it on the tablet.
+ *
+ * @returns {{ deliveryStatus: 'sent' | 'failed' }}
+ */
+exports.sendContractPreviewWhatsApp = async (rentalId, phone, userId) => {
+  const { pdfPath } = await renderContractPreviewPdf(rentalId, userId);
+
+  let deliveryStatus = 'failed';
+  try {
+    const sent = await whatsappService.sendDocument({
+      to: phone,
+      filePath: pdfPath,
+      fileName: `previa_contrato_${rentalId.slice(0, 8)}.pdf`,
+      caption: `Prévia do Contrato de Prestação de Serviços e Locação de Trajes a Rigor (Contrato Nº ${rentalId
+        .slice(0, 8)
+        .toUpperCase()})`,
+    });
+    deliveryStatus = sent ? 'sent' : 'failed';
+  } catch (error) {
+    console.error('Error sending contract preview %s via WhatsApp:', rentalId, error);
+  } finally {
+    await safeUnlink(pdfPath);
+  }
+
+  return { deliveryStatus };
+};
+
+/**
+ * Renders the unsigned contract preview PDF and returns it as a Buffer.
+ */
+exports.getContractPreviewPdfBuffer = async (rentalId, userId) => {
+  const { pdfPath } = await renderContractPreviewPdf(rentalId, userId);
+
+  try {
+    return await fs.promises.readFile(pdfPath);
+  } finally {
+    await safeUnlink(pdfPath);
+  }
+};
+
+/**
+ * Sends the unsigned contract preview PDF by e-mail so the customer can read
+ * the document before signing it on the tablet.
+ *
+ * @returns {{ deliveryStatus: 'sent' | 'failed' }}
+ */
+exports.sendContractPreviewEmail = async (rentalId, email, userId) => {
+  const { pdfPath, data } = await renderContractPreviewPdf(rentalId, userId);
+
+  let deliveryStatus = 'failed';
+  try {
+    const sent = await emailService.sendEmail({
+      to: email,
+      subject: `Prévia do Contrato de Prestação de Serviços e Locação de Trajes a Rigor - ${data.store?.name || 'Madri Noivas'}`,
+      text: `Olá, ${data.customer?.name || 'cliente'}! Segue em anexo a prévia do seu Contrato de Prestação de Serviços e Locação de Trajes a Rigor (Contrato Nº ${rentalId
+        .slice(0, 8)
+        .toUpperCase()}).`,
+      attachments: [
+        {
+          filename: `previa_contrato_${rentalId.slice(0, 8)}.pdf`,
+          path: pdfPath,
+        },
+      ],
+    });
+    deliveryStatus = sent ? 'sent' : 'failed';
+  } catch (error) {
+    console.error('Error sending contract preview %s via email:', rentalId, error);
+  } finally {
+    await safeUnlink(pdfPath);
   }
 
   return { deliveryStatus };
