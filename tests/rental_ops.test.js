@@ -189,4 +189,160 @@ describe('Rental Operations (Return & Cancel)', () => {
     expect(res.body.message).toMatch(/finalizado ou cancelado/i);
     expect(RentalModel.updateRental).not.toHaveBeenCalled();
   });
+
+  // --- PICKUP (RETIRADA) ---
+
+  it('POST /api/rentals/:id/pickup › Should confirm pickup of a reserved rental', async () => {
+    RentalModel.findById.mockResolvedValue({
+      id: 'rental-reserved',
+      store_id: 'store-A',
+      status: 'reserved',
+    });
+    RentalModel.pickUp.mockResolvedValue(true);
+
+    const res = await request(app).post('/api/rentals/rental-reserved/pickup');
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.message).toMatch(/retirada confirmada/i);
+    expect(RentalModel.pickUp).toHaveBeenCalledWith('rental-reserved');
+  });
+
+  it('POST /api/rentals/:id/pickup › Should FAIL when status does not allow pickup', async () => {
+    RentalModel.findById.mockResolvedValue({
+      id: 'rental-picked',
+      store_id: 'store-A',
+      status: 'picked_up',
+    });
+
+    const res = await request(app).post('/api/rentals/rental-picked/pickup');
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.message).toMatch(/não permite retirada/i);
+    expect(RentalModel.pickUp).not.toHaveBeenCalled();
+  });
+
+  it('POST /api/rentals/:id/pickup › Should DENY pickup from another store', async () => {
+    RentalModel.findById.mockResolvedValue({
+      id: 'rental-other',
+      store_id: 'store-B',
+      status: 'reserved',
+    });
+
+    const res = await request(app).post('/api/rentals/rental-other/pickup');
+
+    expect(res.statusCode).toBe(403);
+    expect(RentalModel.pickUp).not.toHaveBeenCalled();
+  });
+
+  // --- EXTEND (PRORROGAÇÃO) ---
+
+  it('POST /api/rentals/:id/extend › Should extend a picked up rental', async () => {
+    RentalModel.findById.mockResolvedValue({
+      id: 'rental-active',
+      store_id: 'store-A',
+      status: 'picked_up',
+    });
+    RentalModel.extendRental.mockResolvedValue(true);
+
+    const res = await request(app)
+      .post('/api/rentals/rental-active/extend')
+      .send({ new_end_date: '2026-12-30', extra_amount: 150 });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.message).toMatch(/prorrogado/i);
+    expect(RentalModel.extendRental).toHaveBeenCalledWith('rental-active', '2026-12-30', 150);
+  });
+
+  it('POST /api/rentals/:id/extend › Should require the new end date', async () => {
+    RentalModel.findById.mockResolvedValue({
+      id: 'rental-active',
+      store_id: 'store-A',
+      status: 'picked_up',
+    });
+
+    const res = await request(app).post('/api/rentals/rental-active/extend').send({});
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.message).toMatch(/nova data/i);
+    expect(RentalModel.extendRental).not.toHaveBeenCalled();
+  });
+
+  it('POST /api/rentals/:id/extend › Should FAIL when the rental was not picked up', async () => {
+    RentalModel.findById.mockResolvedValue({
+      id: 'rental-reserved',
+      store_id: 'store-A',
+      status: 'reserved',
+    });
+
+    const res = await request(app)
+      .post('/api/rentals/rental-reserved/extend')
+      .send({ new_end_date: '2026-12-30' });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.message).toMatch(/já foram retirados/i);
+    expect(RentalModel.extendRental).not.toHaveBeenCalled();
+  });
+
+  // --- RETURN OPTIONS ---
+
+  it('POST /api/rentals/:id/return › Should forward the penalty and makeAvailable flag', async () => {
+    RentalModel.findById.mockResolvedValue({
+      id: 'rental-active',
+      store_id: 'store-A',
+      status: 'picked_up',
+    });
+    RentalModel.returnRental.mockResolvedValue({ penaltyFee: 25 });
+
+    const res = await request(app)
+      .post('/api/rentals/rental-active/return')
+      .send({ penalty_fee: 25, makeAvailable: true });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.message).toMatch(/disponíveis/i);
+    expect(RentalModel.returnRental).toHaveBeenCalledWith('rental-active', 25, true);
+  });
+
+  // --- DELETE (EXCLUSÃO PERMANENTE) ---
+
+  it('DELETE /api/rentals/:id › Should permanently delete a cancelled rental', async () => {
+    RentalModel.findById.mockResolvedValue({
+      id: 'rental-cancelled',
+      store_id: 'store-A',
+      status: 'cancelled',
+    });
+    RentalModel.deleteRental.mockResolvedValue(true);
+
+    const res = await request(app).delete('/api/rentals/rental-cancelled');
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.message).toMatch(/excluído permanentemente/i);
+    expect(RentalModel.deleteRental).toHaveBeenCalledWith('rental-cancelled');
+  });
+
+  it('DELETE /api/rentals/:id › Should FAIL to delete a rental that is not cancelled', async () => {
+    RentalModel.findById.mockResolvedValue({
+      id: 'rental-reserved',
+      store_id: 'store-A',
+      status: 'reserved',
+    });
+
+    const res = await request(app).delete('/api/rentals/rental-reserved');
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.message).toMatch(/Apenas itens cancelados/i);
+    expect(RentalModel.deleteRental).not.toHaveBeenCalled();
+  });
+
+  it('DELETE /api/rentals/:id › Should DENY deleting a rental from another store', async () => {
+    RentalModel.findById.mockResolvedValue({
+      id: 'rental-other',
+      store_id: 'store-B',
+      status: 'cancelled',
+    });
+
+    const res = await request(app).delete('/api/rentals/rental-other');
+
+    expect(res.statusCode).toBe(403);
+    expect(RentalModel.deleteRental).not.toHaveBeenCalled();
+  });
 });
