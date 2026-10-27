@@ -3,8 +3,11 @@ const router = express.Router();
 const rentalController = require('../controllers/rentalController');
 const contractController = require('../controllers/contractController');
 const { protect, restrictTo } = require('../middlewares/authMiddleware');
+const { requireStoreScope } = require('../middlewares/storeScopeMiddleware');
 
 router.use(protect);
+router.use(restrictTo('admin', 'owner', 'local_manager', 'attendant'));
+router.use(requireStoreScope);
 
 // Listagem e Cadastro
 router.get('/', rentalController.getAllRentals);
@@ -24,7 +27,7 @@ router.post('/:id/contract/send-whatsapp', contractController.sendContractPrevie
 router.get('/:id/contract/preview/pdf', contractController.getContractPreviewPdfByRental);
 router.get('/:id/contract/pdf', contractController.getContractPdfByRental);
 
-// Hard Delete - Apenas admin/owner e status cancelled
-router.delete('/:id', restrictTo('admin', 'owner'), rentalController.deleteRental);
+// Hard Delete - Apenas admin/owner/local_manager e status cancelled
+router.delete('/:id', restrictTo('admin', 'owner', 'local_manager'), rentalController.deleteRental);
 
 module.exports = router;

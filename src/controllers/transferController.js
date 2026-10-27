@@ -1,5 +1,11 @@
 const Transfer = require('../models/TransferModel');
 const Product = require('../models/ProductModel'); // Precisamos atualizar o produto
+const {
+  isGlobalRole,
+  isLocalManager,
+  getUserStoreId,
+  canAccessStore,
+} = require('../middlewares/storeScopeMiddleware');
 
 // 1. Solicitar Transferência (Inicia o processo)
 exports.requestTransfer = async (req, res) => {
@@ -26,6 +32,10 @@ exports.requestTransfer = async (req, res) => {
 
     if (product.store_id === to_store_id) {
       return res.status(400).json({ message: 'O produto já se encontra na loja de destino.' });
+    }
+
+    if (isLocalManager(req.user) && !canAccessStore(req.user, product.store_id)) {
+      return res.status(403).json({ message: 'Acesso negado a produtos de outra loja.' });
     }
 
     // --- LÓGICA DE TRANSAÇÃO ---
@@ -58,7 +68,6 @@ exports.receiveTransfer = async (req, res) => {
   try {
     const { transfer_id } = req.body;
     const userId = req.user.id;
-    const userStoreId = req.user.storeId;
 
     const transfer = await Transfer.findById(transfer_id);
 
@@ -70,13 +79,8 @@ exports.receiveTransfer = async (req, res) => {
       return res.status(400).json({ message: 'Esta transferência já foi concluída ou cancelada.' });
     }
 
-    // Segurança: Apenas alguém da loja de destino pode confirmar o recebimento
-    // (A menos que seja admin ou owner global)
-    const userRole = req.user.role;
-    const isAdminOrOwner =
-      userRole === 'admin' || userRole === 'owner' || userRole === 'proprietario';
-
-    if (userStoreId && userStoreId !== transfer.to_store_id && !isAdminOrOwner) {
+    // Segurança: apenas admin/owner ou alguém da loja de destino pode confirmar.
+    if (!canAccessStore(req.user, transfer.to_store_id)) {
       return res
         .status(403)
         .json({ message: 'Apenas funcionários da loja de destino podem receber o produto.' });
@@ -107,12 +111,16 @@ exports.receiveTransfer = async (req, res) => {
 exports.getMyTransfers = async (req, res) => {
   try {
     const filters = {};
-    const userStoreId = req.user.storeId;
+    const userStoreId = getUserStoreId(req.user);
 
-    // Se for funcionário de loja, vê o que está a chegar (to) ou o que enviou (from)
-    if (userStoreId) {
-      // Simplificação: vamos buscar o que está "Para mim"
+    if (isLocalManager(req.user)) {
+      // O gerente local acompanha transferências enviadas e recebidas.
+      filters.store_id = userStoreId;
+    } else if (userStoreId && !isGlobalRole(req.user)) {
+      // Funcionários continuam a ver o que está a chegar à sua loja.
       filters.to_store_id = userStoreId;
+    } else if (req.query.store_id) {
+      filters.store_id = req.query.store_id;
     }
 
     // Podemos passar status via query (ex: ?status=active)
@@ -158,6 +166,10 @@ exports.requestTransferFromProduct = async (req, res) => {
       return res.status(400).json({ message: 'O produto já se encontra na loja de destino.' });
     }
 
+    if (isLocalManager(req.user) && !canAccessStore(req.user, product.store_id)) {
+      return res.status(403).json({ message: 'Acesso negado a produtos de outra loja.' });
+    }
+
     // A. Atualiza status do produto para 'transferring'
     await Product.update(productId, { status: 'transferring' });
 
@@ -187,7 +199,6 @@ exports.receiveTransferFromProduct = async (req, res) => {
     const { productId } = req.params;
     const { transfer_id } = req.body;
     const userId = req.user.id;
-    const userStoreId = req.user.storeId;
 
     const transfer = await Transfer.findById(transfer_id);
 
@@ -203,13 +214,8 @@ exports.receiveTransferFromProduct = async (req, res) => {
       return res.status(400).json({ message: 'Esta transferência já foi concluída ou cancelada.' });
     }
 
-    // Segurança: Apenas alguém da loja de destino pode confirmar o recebimento
-    // (A menos que seja admin ou owner global)
-    const userRole = req.user.role;
-    const isAdminOrOwner =
-      userRole === 'admin' || userRole === 'owner' || userRole === 'proprietario';
-
-    if (userStoreId && userStoreId !== transfer.to_store_id && !isAdminOrOwner) {
+    // Segurança: apenas admin/owner ou alguém da loja de destino pode confirmar.
+    if (!canAccessStore(req.user, transfer.to_store_id)) {
       return res
         .status(403)
         .json({ message: 'Apenas funcionários da loja de destino podem receber o produto.' });
@@ -239,8 +245,17 @@ exports.getTransfersByProduct = async (req, res) => {
   try {
     const { productId } = req.params;
 
-    // Reutiliza o findAll filtrando por product_id
-    const transfers = await Transfer.findAll({ product_id: productId });
+    let transfers = await Transfer.findAll({ product_id: productId });
+
+    if (isLocalManager(req.user)) {
+      const userStoreId = getUserStoreId(req.user);
+      transfers = transfers.filter(
+        (transfer) =>
+          String(transfer.from_store_id) === String(userStoreId) ||
+          String(transfer.to_store_id) === String(userStoreId),
+      );
+    }
+
     res.status(200).json({ status: 'success', data: transfers });
   } catch (error) {
     console.error('Erro ao listar transferências do produto:', error);
@@ -253,8 +268,6 @@ exports.cancelTransfer = async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user.id;
-    const userRole = req.user.role;
-    const userStoreId = req.user.storeId;
 
     const transfer = await Transfer.findById(id);
 
@@ -273,12 +286,8 @@ exports.cancelTransfer = async (req, res) => {
       return res.status(400).json({ message: 'Produto não está em transferência.' });
     }
 
-    // Segurança: admin/owner OU pertence à loja de origem
-    const isAdminOrOwner =
-      userRole === 'admin' || userRole === 'owner' || userRole === 'proprietario';
-    const isFromStore = userStoreId && String(userStoreId) === String(transfer.from_store_id);
-
-    if (!isAdminOrOwner && !isFromStore) {
+    // Segurança: admin/owner ou loja de origem.
+    if (!canAccessStore(req.user, transfer.from_store_id)) {
       return res
         .status(403)
         .json({ message: 'Você não tem permissão para cancelar esta transferência.' });
@@ -313,8 +322,6 @@ exports.updateTransfer = async (req, res) => {
   try {
     const { id } = req.params;
     const { to_store_id, notes } = req.body;
-    const userRole = req.user.role;
-    const userStoreId = req.user.storeId;
 
     const transfer = await Transfer.findById(id);
 
@@ -326,12 +333,8 @@ exports.updateTransfer = async (req, res) => {
       return res.status(400).json({ message: 'Apenas transferências ativas podem ser editadas.' });
     }
 
-    // Segurança: admin/owner OU pertence à loja de origem
-    const isAdminOrOwner =
-      userRole === 'admin' || userRole === 'owner' || userRole === 'proprietario';
-    const isFromStore = userStoreId && String(userStoreId) === String(transfer.from_store_id);
-
-    if (!isAdminOrOwner && !isFromStore) {
+    // Segurança: admin/owner ou loja de origem.
+    if (!canAccessStore(req.user, transfer.from_store_id)) {
       return res
         .status(403)
         .json({ message: 'Você não tem permissão para editar esta transferência.' });

@@ -1,5 +1,11 @@
 const Rental = require('../models/RentalModel');
 const Product = require('../models/ProductModel'); // Opcional: para validar se produtos existem
+const {
+  isGlobalRole,
+  getUserStoreId,
+  resolveStoreId,
+  canAccessStore,
+} = require('../middlewares/storeScopeMiddleware');
 
 /**
  * Validates the optional fitting date (prova do traje) against the rental dates.
@@ -54,7 +60,9 @@ exports.createRental = async (req, res) => {
     }
 
     // 2. Define a Loja
-    const finalStoreId = req.user.storeId || store_id;
+    const finalStoreId = isGlobalRole(req.user)
+      ? store_id || getUserStoreId(req.user)
+      : getUserStoreId(req.user);
     if (!finalStoreId) {
       return res.status(400).json({ message: 'Loja não identificada.' });
     }
@@ -68,6 +76,12 @@ exports.createRental = async (req, res) => {
 
       if (!productDb) {
         return res.status(404).json({ message: `Produto ID ${item.id} não encontrado.` });
+      }
+
+      if (!canAccessStore(req.user, productDb.store_id)) {
+        return res.status(403).json({
+          message: `Produto ${productDb.name} não pertence à sua loja.`,
+        });
       }
 
       // Validação de Status (se não for orçamento)
@@ -102,8 +116,7 @@ exports.getRentalById = async (req, res) => {
     const rental = await Rental.findById(req.params.id);
     if (!rental) return res.status(404).json({ message: 'Aluguel não encontrado' });
 
-    // Segurança: Atendente só vê da sua loja
-    if (req.user.storeId && rental.store_id !== req.user.storeId) {
+    if (!canAccessStore(req.user, rental.store_id)) {
       return res.status(403).json({ message: 'Acesso negado.' });
     }
 
@@ -117,7 +130,8 @@ exports.getRentalById = async (req, res) => {
 exports.getAllRentals = async (req, res) => {
   try {
     const filters = {};
-    if (req.user.storeId) filters.store_id = req.user.storeId;
+    const storeId = resolveStoreId(req.user, req.query.store_id);
+    if (storeId) filters.store_id = storeId;
     if (req.query.status) filters.status = req.query.status;
 
     const rentals = await Rental.findAll(filters);
@@ -132,7 +146,7 @@ exports.updateRental = async (req, res) => {
   try {
     const rental = await Rental.findById(req.params.id);
     if (!rental) return res.status(404).json({ message: 'Aluguel não encontrado' });
-    if (req.user.storeId && rental.store_id !== req.user.storeId)
+    if (!canAccessStore(req.user, rental.store_id))
       return res.status(403).json({ message: 'Acesso negado.' });
 
     // Finalizados/cancelados nunca podem ser editados
@@ -178,6 +192,10 @@ exports.updateRental = async (req, res) => {
         const productDb = await Product.findById(item.id);
         if (!productDb)
           return res.status(404).json({ message: `Produto ID ${item.id} não encontrado.` });
+        if (!canAccessStore(req.user, productDb.store_id))
+          return res.status(403).json({
+            message: `Produto ${productDb.name} não pertence à sua loja.`,
+          });
         itemsToSave.push({
           product_id: productDb.id,
           unit_price: productDb.rental_price, // Busca preço oficial do banco
@@ -186,7 +204,11 @@ exports.updateRental = async (req, res) => {
       }
     }
 
-    await Rental.updateRental(req.params.id, { ...req.body, items: itemsToSave });
+    const data = { ...req.body, items: itemsToSave };
+    if (!isGlobalRole(req.user)) {
+      delete data.store_id;
+    }
+    await Rental.updateRental(req.params.id, data);
     res.status(200).json({ status: 'success', message: 'Aluguel atualizado.' });
   } catch (error) {
     console.error(error);
@@ -198,7 +220,7 @@ exports.pickUpRental = async (req, res) => {
   try {
     const rental = await Rental.findById(req.params.id);
     if (!rental) return res.status(404).json({ message: 'Aluguel não encontrado' });
-    if (req.user.storeId && rental.store_id !== req.user.storeId)
+    if (!canAccessStore(req.user, rental.store_id))
       return res.status(403).json({ message: 'Acesso negado.' });
 
     if (rental.status !== 'reserved' && rental.status !== 'budget') {
@@ -217,7 +239,7 @@ exports.extendRental = async (req, res) => {
   try {
     const rental = await Rental.findById(req.params.id);
     if (!rental) return res.status(404).json({ message: 'Aluguel não encontrado' });
-    if (req.user.storeId && rental.store_id !== req.user.storeId)
+    if (!canAccessStore(req.user, rental.store_id))
       return res.status(403).json({ message: 'Acesso negado.' });
 
     if (rental.status !== 'picked_up' && rental.status !== 'late') {
@@ -243,7 +265,7 @@ exports.returnRental = async (req, res) => {
     const { id } = req.params;
     const rental = await Rental.findById(id);
     if (!rental) return res.status(404).json({ message: 'Aluguel não encontrado' });
-    if (req.user.storeId && rental.store_id !== req.user.storeId)
+    if (!canAccessStore(req.user, rental.store_id))
       return res.status(403).json({ message: 'Acesso negado.' });
     if (rental.status === 'returned' || rental.status === 'cancelled') {
       return res.status(400).json({ message: 'Aluguel já foi finalizado ou cancelado.' });
@@ -276,7 +298,7 @@ exports.cancelRental = async (req, res) => {
 
     if (!rental) return res.status(404).json({ message: 'Aluguel não encontrado' });
 
-    if (req.user.storeId && rental.store_id !== req.user.storeId) {
+    if (!canAccessStore(req.user, rental.store_id)) {
       return res.status(403).json({ message: 'Acesso negado.' });
     }
 
@@ -304,7 +326,7 @@ exports.deleteRental = async (req, res) => {
 
     if (!rental) return res.status(404).json({ message: 'Aluguel não encontrado' });
 
-    if (req.user.storeId && rental.store_id !== req.user.storeId) {
+    if (!canAccessStore(req.user, rental.store_id)) {
       return res.status(403).json({ message: 'Acesso negado.' });
     }
 

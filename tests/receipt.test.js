@@ -4,6 +4,7 @@ const os = require('os');
 const path = require('path');
 const app = require('../src/app');
 const PaymentModel = require('../src/models/PaymentModel');
+const RentalModel = require('../src/models/RentalModel');
 const ReceiptModel = require('../src/models/ReceiptModel');
 const receiptService = require('../src/services/receiptService');
 
@@ -12,6 +13,7 @@ const receiptService = require('../src/services/receiptService');
 // =================================================================
 
 jest.mock('../src/models/PaymentModel');
+jest.mock('../src/models/RentalModel');
 jest.mock('../src/models/ReceiptModel');
 jest.mock('../src/services/receiptService');
 
@@ -30,6 +32,10 @@ jest.mock('../src/middlewares/authMiddleware', () => ({
 // 2. API TESTS
 // =================================================================
 describe('Payment Receipts API', () => {
+  beforeEach(() => {
+    RentalModel.findById.mockResolvedValue({ id: 'rental-123', store_id: 'store-A' });
+  });
+
   afterEach(() => {
     jest.clearAllMocks();
   });

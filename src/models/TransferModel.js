@@ -191,6 +191,12 @@ class TransferModel {
 
     const params = [];
 
+    // Filtro: transferências que envolvem uma loja (enviadas ou recebidas)
+    if (filters.store_id) {
+      sql += ' AND (t.from_store_id = ? OR t.to_store_id = ?)';
+      params.push(filters.store_id, filters.store_id);
+    }
+
     // Filtro: Ver o que está a chegar à minha loja
     if (filters.to_store_id) {
       sql += ' AND t.to_store_id = ?';

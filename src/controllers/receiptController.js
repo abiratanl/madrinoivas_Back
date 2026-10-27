@@ -1,6 +1,8 @@
 const PaymentModel = require('../models/PaymentModel');
+const RentalModel = require('../models/RentalModel');
 const ReceiptModel = require('../models/ReceiptModel');
 const receiptService = require('../services/receiptService');
+const { canAccessStore } = require('../middlewares/storeScopeMiddleware');
 
 /**
  * POST /api/payments/:id/receipt
@@ -22,6 +24,14 @@ exports.issueReceipt = async (req, res) => {
       return res
         .status(422)
         .json({ message: 'Não é possível emitir recibo de um pagamento cancelado.' });
+    }
+
+    const rental = await RentalModel.findById(payment.rental_id);
+    if (!rental) {
+      return res.status(404).json({ message: 'Aluguel não encontrado.' });
+    }
+    if (!canAccessStore(req.user, rental.store_id)) {
+      return res.status(403).json({ message: 'Acesso negado a recibos de outra loja.' });
     }
 
     const { receiptId, deliveryStatus, pdfBuffer } = await receiptService.issueReceipt(
@@ -61,6 +71,14 @@ exports.getReceiptsByPayment = async (req, res) => {
     const payment = await PaymentModel.findById(id);
     if (!payment) {
       return res.status(404).json({ message: 'Pagamento não encontrado.' });
+    }
+
+    const rental = await RentalModel.findById(payment.rental_id);
+    if (!rental) {
+      return res.status(404).json({ message: 'Aluguel não encontrado.' });
+    }
+    if (!canAccessStore(req.user, rental.store_id)) {
+      return res.status(403).json({ message: 'Acesso negado a recibos de outra loja.' });
     }
 
     const receipts = await ReceiptModel.findByPaymentId(id);

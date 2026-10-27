@@ -1,12 +1,13 @@
 const Customer = require('../models/CustomerModel');
+const { isGlobalRole, getUserStoreId } = require('../middlewares/storeScopeMiddleware');
 
 exports.getAllCustomers = async (req, res) => {
   try {
     const filters = {
       search: req.query.search,
-      includeInactives: req.query.includeInactives === 'true'
+      includeInactives: req.query.includeInactives === 'true',
     };
-    
+
     const customers = await Customer.findAll(filters);
     res.status(200).json({ status: 'success', results: customers.length, data: customers });
   } catch (error) {
@@ -33,15 +34,16 @@ exports.getCustomerById = async (req, res) => {
 
 exports.createCustomer = async (req, res) => {
   try {
-    const { 
-      name, rg, cpf, birth_date, measurements, notes, 
-      addresses, contacts 
-    } = req.body; // Adicionado 'rg' aqui na extração
+    const { name, rg, cpf, birth_date, measurements, notes, addresses, contacts, store_id } =
+      req.body;
 
-    // Validação Básica
     if (!name || !contacts || contacts.length === 0) {
-      return res.status(400).json({ status: 'error', message: 'Nome e pelo menos um contato são obrigatórios.' });
+      return res
+        .status(400)
+        .json({ status: 'error', message: 'Nome e pelo menos um contato são obrigatórios.' });
     }
+
+    const finalStoreId = isGlobalRole(req.user) ? store_id || null : getUserStoreId(req.user);
 
     // Verificar se CPF já existe
     if (cpf) {
@@ -60,14 +62,23 @@ exports.createCustomer = async (req, res) => {
     }
 
     const newCustomer = await Customer.create({
-      name, rg, cpf, birth_date, measurements, notes, addresses, contacts
+      store_id: finalStoreId,
+      name,
+      rg,
+      cpf,
+      birth_date,
+      measurements,
+      notes,
+      addresses,
+      contacts,
     });
 
     res.status(201).json({ status: 'success', data: newCustomer });
-
   } catch (error) {
     if (error.code === 'ER_DUP_ENTRY') {
-      return res.status(409).json({ status: 'error', message: 'Dados duplicados (CPF ou RG já existem).' });
+      return res
+        .status(409)
+        .json({ status: 'error', message: 'Dados duplicados (CPF ou RG já existem).' });
     }
     console.error('Error creating customer:', error);
     res.status(500).json({ status: 'error', message: 'Erro interno ao criar cliente.' });
@@ -77,7 +88,18 @@ exports.createCustomer = async (req, res) => {
 exports.updateCustomer = async (req, res) => {
   try {
     const { id } = req.params;
-    const updated = await Customer.update(id, req.body);
+    const existing = await Customer.findById(id);
+
+    if (!existing) {
+      return res.status(404).json({ message: 'Cliente não encontrado.' });
+    }
+
+    const data = { ...req.body };
+    if (!isGlobalRole(req.user)) {
+      data.store_id = existing.store_id;
+    }
+
+    const updated = await Customer.update(id, data);
 
     if (!updated) {
       return res.status(404).json({ message: 'Cliente não encontrado ou nada a atualizar.' });
@@ -93,6 +115,12 @@ exports.updateCustomer = async (req, res) => {
 exports.deleteCustomer = async (req, res) => {
   try {
     const { id } = req.params;
+    const existing = await Customer.findById(id);
+
+    if (!existing) {
+      return res.status(404).json({ status: 'error', message: 'Cliente não encontrado.' });
+    }
+
     const deleted = await Customer.softDelete(id);
 
     if (!deleted) {
@@ -109,25 +137,33 @@ exports.deleteCustomer = async (req, res) => {
 exports.hardDeleteCustomer = async (req, res) => {
   try {
     const { id } = req.params;
-    
-    const deleted = await Customer.hardDelete(id);
+    const existing = await Customer.findById(id);
 
-    if (!deleted) {
-      return res.status(404).json({ 
-        status: 'error', 
-        message: 'Cliente não encontrado para exclusão permanente.' 
+    if (!existing) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Cliente não encontrado para exclusão permanente.',
       });
     }
 
-    res.status(200).json({ 
-      status: 'success', 
-      message: 'Cliente e todos os seus vínculos foram removidos permanentemente.' 
+    const deleted = await Customer.hardDelete(id);
+
+    if (!deleted) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'Cliente não encontrado para exclusão permanente.',
+      });
+    }
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Cliente e todos os seus vínculos foram removidos permanentemente.',
     });
   } catch (error) {
     console.error('Error in hardDeleteCustomer:', error);
-    res.status(500).json({ 
-      status: 'error', 
-      message: 'Erro ao realizar exclusão permanente. Verifique dependências no banco.' 
+    res.status(500).json({
+      status: 'error',
+      message: 'Erro ao realizar exclusão permanente. Verifique dependências no banco.',
     });
   }
 };

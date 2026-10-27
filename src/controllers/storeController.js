@@ -1,5 +1,6 @@
 const Store = require('../models/StoreModel');
 const { getPublicUrl, extractKey, deleteFile } = require('../services/uploadService');
+const { canAccessStore } = require('../middlewares/storeScopeMiddleware');
 
 // Must match the `type` ENUM of the contacts table
 const ALLOWED_CONTACT_TYPES = ['mobile', 'whatsapp', 'landline', 'email', 'instagram', 'facebook'];
@@ -131,6 +132,13 @@ exports.getStoreById = async (req, res) => {
       return res.status(404).json({
         status: 'error',
         message: 'Loja não encontrada.',
+      });
+    }
+
+    if (!canAccessStore(req.user, store.id)) {
+      return res.status(403).json({
+        status: 'error',
+        message: 'Acesso negado a esta loja.',
       });
     }
 

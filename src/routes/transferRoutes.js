@@ -1,9 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const transferController = require('../controllers/transferController');
-const { protect } = require('../middlewares/authMiddleware');
+const { protect, restrictTo } = require('../middlewares/authMiddleware');
+const { requireStoreScope } = require('../middlewares/storeScopeMiddleware');
 
-router.use(protect); // Todas protegidas
+router.use(protect);
+router.use(restrictTo('admin', 'owner', 'local_manager', 'attendant'));
+router.use(requireStoreScope);
 
 // --- Rotas originais (Transfer-centric) ---
 router.get('/', transferController.getMyTransfers);

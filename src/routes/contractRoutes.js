@@ -2,8 +2,11 @@ const express = require('express');
 const router = express.Router();
 const contractController = require('../controllers/contractController');
 const { protect, restrictTo } = require('../middlewares/authMiddleware');
+const { requireStoreScope } = require('../middlewares/storeScopeMiddleware');
 
 router.use(protect);
+router.use(restrictTo('admin', 'owner', 'local_manager', 'attendant'));
+router.use(requireStoreScope);
 
 // Dual PDF persistence flow: generate the draft, then sign it.
 router.post('/generate', contractController.generateContractDraft);

@@ -1,6 +1,25 @@
 const RentalModel = require('../models/RentalModel');
 const ContractModel = require('../models/ContractModel');
 const contractService = require('../services/contractService');
+const { canAccessStore } = require('../middlewares/storeScopeMiddleware');
+
+function denyStoreAccess(res, message = 'Acesso negado a contratos de outra loja.') {
+  return res.status(403).json({ message });
+}
+
+async function contractBelongsToUserStore(req, res, contract) {
+  if (!contract?.rental_id) return true;
+  const rental = await RentalModel.findById(contract.rental_id);
+  if (!rental) {
+    res.status(404).json({ message: 'Aluguel não encontrado.' });
+    return false;
+  }
+  if (!canAccessStore(req.user, rental.store_id)) {
+    denyStoreAccess(res);
+    return false;
+  }
+  return true;
+}
 
 /**
  * Captures the signing audit metadata from the tablet request.
@@ -40,6 +59,14 @@ exports.generateContractDraft = async (req, res) => {
     const rentalId = req.body?.rental_id || req.body?.rentalId || req.body?.id;
     if (!rentalId) {
       return res.status(400).json({ message: 'O aluguel é obrigatório.' });
+    }
+
+    const rental = await RentalModel.findById(rentalId);
+    if (!rental) {
+      return res.status(404).json({ message: 'Aluguel não encontrado.' });
+    }
+    if (!canAccessStore(req.user, rental.store_id)) {
+      return denyStoreAccess(res);
     }
 
     const { contract, contractNumber, documentHash, draftPdfPath, draftPdfUrl } =
@@ -87,6 +114,12 @@ exports.signContract = async (req, res) => {
     if (!lessee_signature) {
       return res.status(400).json({ message: 'A assinatura da locatária é obrigatória.' });
     }
+
+    const contract = await ContractModel.findById(id);
+    if (!contract) {
+      return res.status(404).json({ message: 'Contrato não encontrado.' });
+    }
+    if (!(await contractBelongsToUserStore(req, res, contract))) return;
 
     const metadata = getAuditMetadata(req);
     let result;
@@ -162,6 +195,12 @@ exports.cancelContract = async (req, res) => {
         .json({ message: 'O motivo do cancelamento deve ter no máximo 2000 caracteres.' });
     }
 
+    const existingContract = await ContractModel.findById(id);
+    if (!existingContract) {
+      return res.status(404).json({ message: 'Contrato não encontrado.' });
+    }
+    if (!(await contractBelongsToUserStore(req, res, existingContract))) return;
+
     let contract;
     try {
       contract = await contractService.cancelContract(id, notes);
@@ -208,6 +247,9 @@ exports.generateContract = async (req, res) => {
     const rental = await RentalModel.findById(id);
     if (!rental) {
       return res.status(404).json({ message: 'Aluguel não encontrado.' });
+    }
+    if (!canAccessStore(req.user, rental.store_id)) {
+      return denyStoreAccess(res);
     }
     if (rental.status === 'cancelled') {
       return res
@@ -258,6 +300,14 @@ exports.getContractByRental = async (req, res) => {
   try {
     const { id } = req.params;
 
+    const rental = await RentalModel.findById(id);
+    if (!rental) {
+      return res.status(404).json({ message: 'Aluguel não encontrado.' });
+    }
+    if (!canAccessStore(req.user, rental.store_id)) {
+      return denyStoreAccess(res);
+    }
+
     const contracts = await ContractModel.findByRentalId(id);
     if (contracts.length === 0) {
       return res.status(404).json({ message: 'Nenhum contrato gerado para este aluguel.' });
@@ -302,6 +352,14 @@ exports.getContractPdfByRental = async (req, res) => {
   try {
     const { id } = req.params;
 
+    const rental = await RentalModel.findById(id);
+    if (!rental) {
+      return res.status(404).json({ message: 'Aluguel não encontrado.' });
+    }
+    if (!canAccessStore(req.user, rental.store_id)) {
+      return denyStoreAccess(res);
+    }
+
     const contracts = await ContractModel.findByRentalId(id);
     if (contracts.length === 0) {
       return res.status(404).json({ message: 'Nenhum contrato gerado para este aluguel.' });
@@ -333,6 +391,7 @@ exports.getContractPdf = async (req, res) => {
     if (!contract) {
       return res.status(404).json({ message: 'Contrato não encontrado.' });
     }
+    if (!(await contractBelongsToUserStore(req, res, contract))) return;
 
     const pdfBuffer = await contractService.getContractPdfBuffer(id);
 
@@ -364,6 +423,7 @@ exports.sendContractEmail = async (req, res) => {
     if (!contract) {
       return res.status(404).json({ message: 'Contrato não encontrado.' });
     }
+    if (!(await contractBelongsToUserStore(req, res, contract))) return;
 
     const { deliveryStatus } = await contractService.sendContractEmail(id, email, req.user.id);
 
@@ -404,6 +464,9 @@ exports.sendContractPreviewWhatsApp = async (req, res) => {
     if (!rental) {
       return res.status(404).json({ message: 'Aluguel não encontrado.' });
     }
+    if (!canAccessStore(req.user, rental.store_id)) {
+      return denyStoreAccess(res);
+    }
     if (rental.status === 'cancelled') {
       return res
         .status(422)
@@ -439,6 +502,14 @@ exports.sendContractPreviewWhatsApp = async (req, res) => {
 exports.getContractPreviewPdfByRental = async (req, res) => {
   try {
     const { id } = req.params;
+
+    const rental = await RentalModel.findById(id);
+    if (!rental) {
+      return res.status(404).json({ message: 'Aluguel não encontrado.' });
+    }
+    if (!canAccessStore(req.user, rental.store_id)) {
+      return denyStoreAccess(res);
+    }
 
     const pdfBuffer = await contractService.getContractPreviewPdfBuffer(id, req.user.id);
 
@@ -478,6 +549,9 @@ exports.sendContractPreviewEmail = async (req, res) => {
     const rental = await RentalModel.findById(id);
     if (!rental) {
       return res.status(404).json({ message: 'Aluguel não encontrado.' });
+    }
+    if (!canAccessStore(req.user, rental.store_id)) {
+      return denyStoreAccess(res);
     }
     if (rental.status === 'cancelled') {
       return res
@@ -524,6 +598,7 @@ exports.sendContractWhatsApp = async (req, res) => {
     if (!contract) {
       return res.status(404).json({ message: 'Contrato não encontrado.' });
     }
+    if (!(await contractBelongsToUserStore(req, res, contract))) return;
 
     const { deliveryStatus } = await contractService.sendContractWhatsApp(id, phone, req.user.id);
 

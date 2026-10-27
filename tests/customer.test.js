@@ -9,33 +9,43 @@ const CustomerModel = require('../src/models/CustomerModel');
 // Mock do Model para não tocar no banco real
 jest.mock('../src/models/CustomerModel');
 
+let mockRole = 'attendant';
+let mockStoreId = 'store-A';
+
 // Mock da Autenticação
 jest.mock('../src/middlewares/authMiddleware', () => ({
   protect: (req, res, next) => {
-    req.user = { id: 'user-id', role: 'attendant', storeId: 'store-A' };
+    req.user = { id: 'user-id', role: mockRole, storeId: mockStoreId };
     next();
   },
-  restrictTo: (...roles) => (req, res, next) => next(),
+  restrictTo:
+    (..._roles) =>
+    (req, res, next) =>
+      next(),
 }));
 
 // =================================================================
 // 2. SUÍTE DE TESTES
 // =================================================================
 describe('Customer Management API', () => {
-  
+  beforeEach(() => {
+    mockRole = 'attendant';
+    mockStoreId = 'store-A';
+  });
+
   afterEach(() => {
     jest.clearAllMocks();
   });
 
   // --- CREATE (POST) ---
-  
+
   it('POST /api/customers › Should create a customer successfully', async () => {
     const newCustomer = {
       name: 'Maria Silva',
       cpf: '123.456.789-00',
       birth_date: '1990-05-20',
       contacts: [{ type: 'whatsapp', value: '11999998888', is_primary: true }],
-      addresses: [{ street: 'Rua A', city: 'Lorena', state: 'SP', zip_code: '12600000' }]
+      addresses: [{ street: 'Rua A', city: 'Lorena', state: 'SP', zip_code: '12600000' }],
     };
 
     // 1. Simula que o CPF não existe (não é duplicado)
@@ -44,7 +54,7 @@ describe('Customer Management API', () => {
     // 2. Simula a criação com sucesso
     CustomerModel.create.mockResolvedValue({
       id: 'uuid-novo',
-      ...newCustomer
+      ...newCustomer,
     });
 
     const res = await request(app).post('/api/customers').send(newCustomer);
@@ -52,12 +62,14 @@ describe('Customer Management API', () => {
     expect(res.statusCode).toBe(201);
     expect(res.body.status).toBe('success');
     expect(res.body.data.name).toBe('Maria Silva');
-    
+
     // Verifica se o Model foi chamado com os dados certos
-    expect(CustomerModel.create).toHaveBeenCalledWith(expect.objectContaining({
-      name: 'Maria Silva',
-      contacts: expect.any(Array)
-    }));
+    expect(CustomerModel.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'Maria Silva',
+        contacts: expect.any(Array),
+      }),
+    );
   });
 
   it('POST /api/customers › Should fail if Name or Contacts are missing', async () => {
@@ -67,7 +79,7 @@ describe('Customer Management API', () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.body.message).toMatch(/obrigatórios/i);
-    
+
     // Garante que nem tentou chamar o banco
     expect(CustomerModel.create).not.toHaveBeenCalled();
   });
@@ -76,7 +88,7 @@ describe('Customer Management API', () => {
     const dupeCustomer = {
       name: 'Joana Duplicada',
       cpf: '111.222.333-44',
-      contacts: [{ type: 'mobile', value: '123' }]
+      contacts: [{ type: 'mobile', value: '123' }],
     };
 
     // Simula que JÁ EXISTE alguém com esse CPF
@@ -93,7 +105,7 @@ describe('Customer Management API', () => {
   it('GET /api/customers › Should return a list of customers', async () => {
     const mockList = [
       { id: '1', name: 'Ana', main_phone: '999', city: 'Cruzeiro' },
-      { id: '2', name: 'Bia', main_phone: '888', city: 'Guará' }
+      { id: '2', name: 'Bia', main_phone: '888', city: 'Guará' },
     ];
 
     CustomerModel.findAll.mockResolvedValue(mockList);
@@ -105,6 +117,16 @@ describe('Customer Management API', () => {
     expect(res.body.data[0].city).toBe('Cruzeiro');
   });
 
+  it('GET /api/customers › Should list customers from all stores for local managers', async () => {
+    mockRole = 'local_manager';
+    CustomerModel.findAll.mockResolvedValue([]);
+
+    await request(app).get('/api/customers');
+
+    const filters = CustomerModel.findAll.mock.calls[0][0];
+    expect(filters.store_id).toBeUndefined();
+  });
+
   // --- DETAILS (GET BY ID) ---
 
   it('GET /api/customers/:id › Should return full customer details', async () => {
@@ -112,7 +134,7 @@ describe('Customer Management API', () => {
       id: 'uuid-10',
       name: 'Carlos',
       addresses: [{ street: 'Rua B' }],
-      contacts: [{ value: 'zap' }]
+      contacts: [{ value: 'zap' }],
     };
 
     CustomerModel.findById.mockResolvedValue(mockDetails);
@@ -132,4 +154,19 @@ describe('Customer Management API', () => {
     expect(res.statusCode).toBe(404);
   });
 
+  it('GET /api/customers/:id › Should allow local managers to view customers from other stores', async () => {
+    mockRole = 'local_manager';
+    CustomerModel.findById.mockResolvedValue({
+      id: 'uuid-store-b',
+      name: 'Cliente de outra loja',
+      store_id: 'store-B',
+      addresses: [],
+      contacts: [],
+    });
+
+    const res = await request(app).get('/api/customers/uuid-store-b');
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.data.store_id).toBe('store-B');
+  });
 });

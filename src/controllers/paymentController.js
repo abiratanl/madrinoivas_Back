@@ -1,5 +1,6 @@
 const Payment = require('../models/PaymentModel');
 const Rental = require('../models/RentalModel'); // Used to validate that the rental exists
+const { canAccessStore } = require('../middlewares/storeScopeMiddleware');
 
 const PAYMENT_TYPES = ['entry', 'installment', 'spontaneous', 'pickup_balance'];
 const PAYMENT_METHODS = ['cash', 'credit_card', 'debit_card', 'pix', 'bank_transfer'];
@@ -32,7 +33,7 @@ exports.createPayment = async (req, res) => {
       return res.status(404).json({ message: 'Aluguel não encontrado.' });
     }
 
-    if (req.user.storeId && rental.store_id !== req.user.storeId) {
+    if (!canAccessStore(req.user, rental.store_id)) {
       return res.status(403).json({ message: 'Não é possível receber pagamentos de outra loja.' });
     }
 
@@ -78,6 +79,13 @@ exports.createPayment = async (req, res) => {
 exports.getPaymentsByRental = async (req, res) => {
   try {
     const { rentalId } = req.params;
+    const rental = await Rental.findById(rentalId);
+    if (!rental) {
+      return res.status(404).json({ message: 'Aluguel não encontrado.' });
+    }
+    if (!canAccessStore(req.user, rental.store_id)) {
+      return res.status(403).json({ message: 'Acesso negado a pagamentos de outra loja.' });
+    }
     const payments = await Payment.findByRentalId(rentalId);
     res.status(200).json({ status: 'success', data: payments });
   } catch (error) {
@@ -102,7 +110,10 @@ exports.updatePayment = async (req, res) => {
 
     // Store check: same pattern as createPayment
     const rental = await Rental.findById(payment.rental_id);
-    if (req.user.storeId && rental && rental.store_id !== req.user.storeId) {
+    if (!rental) {
+      return res.status(404).json({ message: 'Aluguel não encontrado.' });
+    }
+    if (!canAccessStore(req.user, rental.store_id)) {
       return res.status(403).json({ message: 'Não é possível editar pagamentos de outra loja.' });
     }
 
@@ -185,7 +196,10 @@ exports.cancelPayment = async (req, res) => {
 
     // Store check: same pattern as createPayment
     const rental = await Rental.findById(payment.rental_id);
-    if (req.user.storeId && rental && rental.store_id !== req.user.storeId) {
+    if (!rental) {
+      return res.status(404).json({ message: 'Aluguel não encontrado.' });
+    }
+    if (!canAccessStore(req.user, rental.store_id)) {
       return res.status(403).json({ message: 'Não é possível cancelar pagamentos de outra loja.' });
     }
 

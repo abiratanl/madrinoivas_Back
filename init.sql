@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS `users` (
 CREATE TABLE IF NOT EXISTS `customers` (
   `id` char(36) NOT NULL,
   `user_id` char(36) DEFAULT NULL,
+  `store_id` char(36) DEFAULT NULL,
   `name` varchar(255) NOT NULL,
   `rg` varchar(12) DEFAULT NULL,
   `cpf` varchar(14) DEFAULT NULL,
@@ -64,7 +65,9 @@ CREATE TABLE IF NOT EXISTS `customers` (
   UNIQUE KEY `cpf` (`cpf`),
   UNIQUE KEY `rg_UNIQUE` (`rg`),
   KEY `fk_customers_user` (`user_id`),
-  CONSTRAINT `fk_customers_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+  KEY `idx_customers_store` (`store_id`),
+  CONSTRAINT `fk_customers_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`),
+  CONSTRAINT `fk_customers_store` FOREIGN KEY (`store_id`) REFERENCES `stores` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
 
 -- =================================================================================

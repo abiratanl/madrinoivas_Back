@@ -8,10 +8,11 @@ const ProductModel = require('../src/models/ProductModel');
 jest.mock('../src/models/ProductModel');
 
 // 2. Mock da Autenticação (Simula usuário logado)
+let mockRole = 'attendant';
 jest.mock('../src/middlewares/authMiddleware', () => ({
   protect: (req, res, next) => {
-    // Simulando um ATTENDANT da Loja A
-    req.user = { id: 'user-1', role: 'attendant', storeId: 'store-A' };
+    // Simulando um usuário da Loja A (role mutável por teste)
+    req.user = { id: 'user-1', role: mockRole, storeId: 'store-A' };
     next();
   },
   restrictTo:
@@ -39,6 +40,7 @@ jest.mock('../src/middlewares/imageMiddleware', () => ({
 describe('Product API (CRUD & Global Search)', () => {
   // Limpa os mocks antes de cada teste para não haver contagem de chamadas errada
   beforeEach(() => {
+    mockRole = 'attendant';
     jest.clearAllMocks();
   });
 
@@ -106,15 +108,25 @@ describe('Product API (CRUD & Global Search)', () => {
   });
 
   // --- TESTE DE BUSCA GLOBAL ---
-  it('GET /api/products?global_search=true › Should IGNORE store filter', async () => {
+  it('GET /api/products?global_search=true › Should IGNORE store filter for admin', async () => {
+    mockRole = 'admin';
     ProductModel.findAll.mockResolvedValue([]);
 
     await request(app).get('/api/products?global_search=true');
 
-    // Recupera os argumentos passados para a função findAll
     const calls = ProductModel.findAll.mock.calls[0][0];
 
-    // Garante que store_id NÃO foi passado nos filtros
     expect(calls.store_id).toBeUndefined();
+  });
+
+  it('GET /api/products?global_search=true › Should keep store filter for local_manager', async () => {
+    mockRole = 'local_manager';
+    ProductModel.findAll.mockResolvedValue([]);
+
+    await request(app).get('/api/products?global_search=true');
+
+    const calls = ProductModel.findAll.mock.calls[0][0];
+
+    expect(calls.store_id).toBe('store-A');
   });
 });
